@@ -110,10 +110,10 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         finalStatus = status;
     }
 
-    // 检查设备是输入还是输出设备
+    // 获取通道数量（分别获取输入和输出通道）
     propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration;
 
-    // 首先检查是否有输入流
+    // 获取输入通道
     propertyAddress.mScope = kAudioDevicePropertyScopeInput;
     UInt32 inputDataSize = 0;
     status = AudioObjectGetPropertyDataSize(
@@ -123,9 +123,32 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         NULL,
         &inputDataSize);
 
-    bool hasInput = (status == noErr && inputDataSize > 0);
+    if (status == noErr && inputDataSize > 0)
+    {
+        AudioBufferList* bufferList = (AudioBufferList*)malloc(inputDataSize);
+        if (bufferList)
+        {
+            status = AudioObjectGetPropertyData(
+                deviceId,
+                &propertyAddress,
+                0,
+                NULL,
+                &inputDataSize,
+                bufferList);
 
-    // 然后检查是否有输出流
+            if (status == noErr)
+            {
+                info->inputChannelCount = 0;
+                for (UInt32 i = 0; i < bufferList->mNumberBuffers; i++)
+                {
+                    info->inputChannelCount += bufferList->mBuffers[i].mNumberChannels;
+                }
+            }
+            free(bufferList);
+        }
+    }
+
+    // 获取输出通道
     propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
     UInt32 outputDataSize = 0;
     status = AudioObjectGetPropertyDataSize(
@@ -135,18 +158,44 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         NULL,
         &outputDataSize);
 
-    bool hasOutput = (status == noErr && outputDataSize > 0);
+    if (status == noErr && outputDataSize > 0)
+    {
+        AudioBufferList* bufferList = (AudioBufferList*)malloc(outputDataSize);
+        if (bufferList)
+        {
+            status = AudioObjectGetPropertyData(
+                deviceId,
+                &propertyAddress,
+                0,
+                NULL,
+                &outputDataSize,
+                bufferList);
 
-    // 设置设备类型
-    if (hasInput && hasOutput)
+            if (status == noErr)
+            {
+                info->outputChannelCount = 0;
+                for (UInt32 i = 0; i < bufferList->mNumberBuffers; i++)
+                {
+                    info->outputChannelCount += bufferList->mBuffers[i].mNumberChannels;
+                }
+            }
+            free(bufferList);
+        }
+    }
+
+    // 更新总通道数和设备类型
+    info->channelCount = info->inputChannelCount + info->outputChannelCount;
+
+    // 根据通道数量设置设备类型
+    if (info->inputChannelCount > 0 && info->outputChannelCount > 0)
     {
         info->deviceType = kDeviceTypeInputOutput;
     }
-    else if (hasInput)
+    else if (info->inputChannelCount > 0)
     {
         info->deviceType = kDeviceTypeInput;
     }
-    else if (hasOutput)
+    else if (info->outputChannelCount > 0)
     {
         info->deviceType = kDeviceTypeOutput;
     }
@@ -155,13 +204,13 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         info->deviceType = kDeviceTypeUnknown;
     }
 
-    // 获取音量
+    // 根据设备类型获取音量或输入音量
     Float32 volume = 0.0f;
     bool volumeValid = false;
 
-    if (hasOutput)
+    if (info->deviceType == kDeviceTypeOutput || info->deviceType == kDeviceTypeInputOutput)
     {
-        // 首先检查设备是否支持音量控制
+        // 获取输出音量
         propertyAddress.mSelector = kAudioDevicePropertyVolumeScalar;
         propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
         propertyAddress.mElement = kAudioObjectPropertyElementMain;
@@ -196,9 +245,10 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         }
     }
 
-    // 对输入设备也进行类似的检查
-    if (!volumeValid && hasInput)
+    if (info->deviceType == kDeviceTypeInput ||
+        (info->deviceType == kDeviceTypeInputOutput && !volumeValid))
     {
+        // 首先尝试获取输入音量
         propertyAddress.mSelector = kAudioDevicePropertyVolumeScalar;
         propertyAddress.mScope = kAudioDevicePropertyScopeInput;
         propertyAddress.mElement = kAudioObjectPropertyElementMain;
@@ -209,11 +259,37 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
             &propertyAddress,
             &isSettable);
 
-        if (status == noErr)
+        if (status == noErr && isSettable)
         {
-            info->hasVolumeControl = isSettable;
+            dataSize = sizeof(Float32);
+            status = AudioObjectGetPropertyData(
+                deviceId,
+                &propertyAddress,
+                0,
+                NULL,
+                &dataSize,
+                &volume);
 
-            if (isSettable)
+            if (status == noErr)
+            {
+                info->volume = volume;
+                info->hasVolumeControl = true;
+                volumeValid = true;
+            }
+        }
+
+        // 如果上面失败了，尝试获取第一个通道的音量
+        if (!volumeValid)
+        {
+            propertyAddress.mSelector = kAudioDevicePropertyVolumeScalar;
+            propertyAddress.mElement = 1; // 第一个通道
+
+            status = AudioObjectIsPropertySettable(
+                deviceId,
+                &propertyAddress,
+                &isSettable);
+
+            if (status == noErr && isSettable)
             {
                 dataSize = sizeof(Float32);
                 status = AudioObjectGetPropertyData(
@@ -227,81 +303,72 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
                 if (status == noErr)
                 {
                     info->volume = volume;
+                    info->hasVolumeControl = true;
                     volumeValid = true;
                 }
             }
         }
-    }
 
-    // 如果上面的方法都失败了，尝试获取虚拟主音量
-    if (!volumeValid)
-    {
-        propertyAddress.mSelector = kAudioDevicePropertyVolumeScalar;
-        propertyAddress.mScope = kAudioObjectPropertyScopeGlobal;
-        propertyAddress.mElement = kAudioObjectPropertyElementMain;
-        dataSize = sizeof(Float32);
-
-        status = AudioObjectGetPropertyData(
-            deviceId,
-            &propertyAddress,
-            0,
-            NULL,
-            &dataSize,
-            &volume);
-
-        if (status == noErr)
+        // 如果还是失败，尝试获取音量的 dB 值
+        if (!volumeValid)
         {
-            info->volume = volume;
-            volumeValid = true;
-        }
-    }
+            propertyAddress.mSelector = kAudioDevicePropertyVolumeDecibels;
+            propertyAddress.mElement = kAudioObjectPropertyElementMain;
 
-    // 如果还是获取不到，尝试获取解码器音量
-    if (!volumeValid)
-    {
-        propertyAddress.mSelector = kAudioDevicePropertyVolumeDecibels;
-        status = AudioObjectGetPropertyData(
-            deviceId,
-            &propertyAddress,
-            0,
-            NULL,
-            &dataSize,
-            &volume);
+            Float32 volumeDB;
+            status = AudioObjectGetPropertyData(
+                deviceId,
+                &propertyAddress,
+                0,
+                NULL,
+                &dataSize,
+                &volumeDB);
 
-        if (status == noErr)
-        {
-            // 将分贝转换为标量值 (0.0 - 1.0)
-            if (volume > 0.0f)
+            if (status == noErr)
             {
-                info->volume = 1.0f;
+                // 将 dB 转换为 0-1 范围的标量值
+                if (volumeDB > 0.0f)
+                {
+                    info->volume = 1.0f;
+                }
+                else if (volumeDB < -96.0f)
+                {
+                    info->volume = 0.0f;
+                }
+                else
+                {
+                    info->volume = (volumeDB + 96.0f) / 96.0f;
+                }
+                info->hasVolumeControl = true;
+                volumeValid = true;
             }
-            else if (volume < -96.0f)
-            {
-                info->volume = 0.0f;
-            }
-            else
-            {
-                info->volume = (volume + 96.0f) / 96.0f;
-            }
-            volumeValid = true;
         }
     }
 
     // 获取静音状态
-    propertyAddress.mSelector = kAudioDevicePropertyMute;
-    propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
-    dataSize = sizeof(UInt32);
-    UInt32 muteState;
+    // 只为输出设备获取静音状态
+    if (info->deviceType == kDeviceTypeOutput || info->deviceType == kDeviceTypeInputOutput)
+    {
+        propertyAddress.mSelector = kAudioDevicePropertyMute;
+        propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
+        propertyAddress.mElement = kAudioObjectPropertyElementMain;
+        dataSize = sizeof(UInt32);
+        UInt32 muteState;
 
-    status = AudioObjectGetPropertyData(
-        deviceId,
-        &propertyAddress,
-        0,
-        NULL,
-        &dataSize,
-        &muteState);
+        status = AudioObjectGetPropertyData(
+            deviceId,
+            &propertyAddress,
+            0,
+            NULL,
+            &dataSize,
+            &muteState);
 
-    info->isMuted = (status == noErr) ? (muteState != 0) : false;
+        info->isMuted = (status == noErr) ? (muteState != 0) : false;
+    }
+    else
+    {
+        info->isMuted = false; // 对于非输出设备，设置为 false
+    }
 
     // 获取当前采样率
     propertyAddress.mSelector = kAudioDevicePropertyNominalSampleRate;
@@ -318,64 +385,6 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         &sampleRate);
 
     info->sampleRate = (status == noErr) ? (UInt32)sampleRate : 0;
-
-    // 获取通道数量（分别获取输入和输出通道）
-    if (hasInput && inputDataSize > 0)
-    {
-        AudioBufferList* bufferList = (AudioBufferList*)malloc(inputDataSize);
-        if (bufferList)
-        {
-            propertyAddress.mScope = kAudioDevicePropertyScopeInput;
-            propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration;
-            status = AudioObjectGetPropertyData(
-                deviceId,
-                &propertyAddress,
-                0,
-                NULL,
-                &inputDataSize,
-                bufferList);
-
-            if (status == noErr)
-            {
-                info->inputChannelCount = 0;
-                for (UInt32 i = 0; i < bufferList->mNumberBuffers; i++)
-                {
-                    info->inputChannelCount += bufferList->mBuffers[i].mNumberChannels;
-                }
-            }
-            free(bufferList);
-        }
-    }
-
-    if (hasOutput && outputDataSize > 0)
-    {
-        AudioBufferList* bufferList = (AudioBufferList*)malloc(outputDataSize);
-        if (bufferList)
-        {
-            propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
-            propertyAddress.mSelector = kAudioDevicePropertyStreamConfiguration;
-            status = AudioObjectGetPropertyData(
-                deviceId,
-                &propertyAddress,
-                0,
-                NULL,
-                &outputDataSize,
-                bufferList);
-
-            if (status == noErr)
-            {
-                info->outputChannelCount = 0;
-                for (UInt32 i = 0; i < bufferList->mNumberBuffers; i++)
-                {
-                    info->outputChannelCount += bufferList->mBuffers[i].mNumberChannels;
-                }
-            }
-            free(bufferList);
-        }
-    }
-
-    // 更新总通道数
-    info->channelCount = info->inputChannelCount + info->outputChannelCount;
 
     // 获取数据格式
     propertyAddress.mSelector = kAudioDevicePropertyStreamFormat;
@@ -414,6 +423,12 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
     if (status == noErr)
     {
         info->transportType = transportType;
+        // 如果是 Continuity Camera，直接设置为不可调节
+        if (transportType == kAudioDeviceTransportTypeContinuityCaptureWired ||
+            transportType == kAudioDeviceTransportTypeContinuityCaptureWireless)
+        {
+            info->hasVolumeControl = false;
+        }
     }
 
     // 获取设备是否活跃/正在使用
@@ -423,8 +438,8 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
     UInt32 isAlive;
     bool deviceIsActive = false;
 
-    // 检查输入状态
-    if (hasInput)
+    // 根据设备类型检查活跃状态
+    if (info->deviceType == kDeviceTypeInput || info->deviceType == kDeviceTypeInputOutput)
     {
         propertyAddress.mScope = kAudioDevicePropertyScopeInput;
         status = AudioObjectGetPropertyData(
@@ -441,8 +456,8 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         }
     }
 
-    // 检查输出状态
-    if (hasOutput && !deviceIsActive)
+    if ((info->deviceType == kDeviceTypeOutput ||
+        info->deviceType == kDeviceTypeInputOutput) && !deviceIsActive)
     {
         propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
         status = AudioObjectGetPropertyData(
@@ -463,11 +478,12 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
     if (deviceIsActive)
     {
         propertyAddress.mSelector = kAudioDevicePropertyDeviceIsRunning;
-        UInt32 isRunning;
 
-        if (hasInput)
+        if (info->deviceType == kDeviceTypeInput ||
+            info->deviceType == kDeviceTypeInputOutput)
         {
             propertyAddress.mScope = kAudioDevicePropertyScopeInput;
+            UInt32 isRunning;
             status = AudioObjectGetPropertyData(
                 deviceId,
                 &propertyAddress,
@@ -482,9 +498,11 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
             }
         }
 
-        if (hasOutput && !info->isRunning)
+        if ((info->deviceType == kDeviceTypeOutput ||
+            info->deviceType == kDeviceTypeInputOutput) && !info->isRunning)
         {
             propertyAddress.mScope = kAudioDevicePropertyScopeOutput;
+            UInt32 isRunning;
             status = AudioObjectGetPropertyData(
                 deviceId,
                 &propertyAddress,
@@ -545,6 +563,9 @@ const char* getTransportTypeName(UInt32 transportType)
         return "DisplayPort";
     case kAudioDeviceTransportTypeAirPlay:
         return "AirPlay";
+    case kAudioDeviceTransportTypeContinuityCaptureWired:
+    case kAudioDeviceTransportTypeContinuityCaptureWireless:
+        return "Continuity Camera";
     default:
         return "Unknown";
     }

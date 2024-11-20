@@ -34,7 +34,20 @@ void printDeviceInfo(const AudioDeviceInfo* info)
 
     printf("\n  传输类型: %s", getTransportTypeName(info->transportType));
 
-    if (info->deviceType != kDeviceTypeInput)
+    if (info->deviceType == kDeviceTypeInput)
+    {
+        printf("\n  输入音量: ");
+        if (!info->hasVolumeControl || info->transportType == kAudioDeviceTransportTypeContinuityCaptureWired ||
+            info->transportType == kAudioDeviceTransportTypeContinuityCaptureWireless)
+        {
+            printf("不可调节");
+        }
+        else
+        {
+            printf("%.0f%%", info->volume * 100);
+        }
+    }
+    else if (info->deviceType == kDeviceTypeOutput || info->deviceType == kDeviceTypeInputOutput)
     {
         printf("\n  音量: ");
         if (!info->hasVolumeControl)
@@ -45,6 +58,7 @@ void printDeviceInfo(const AudioDeviceInfo* info)
         {
             printf("%.0f%%", info->volume * 100);
         }
+        // 只为输出设备显示静音状态
         printf(", 静音: %s", info->isMuted ? "是" : "否");
     }
 
