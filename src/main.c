@@ -6,6 +6,7 @@ void printUsage()
     printf("  audioctl [命令] [参数]\n\n");
     printf("可用命令：\n");
     printf("  list                 - 显示所有音频设备\n");
+    printf("  list --active|-a     - 只列出使用中的音频设备\n");
 }
 
 #define ANSI_COLOR_RED     "\x1b[31m"
@@ -87,17 +88,61 @@ int main(int argc, char* argv[])
     {
         AudioDeviceInfo* devices;
         UInt32 deviceCount;
+        bool showOnlyActive = false;
+
+        // 检查是否有 --active 或 -a 参数
+        if (argc > 2 && (strcmp(argv[2], "--active") == 0 || strcmp(argv[2], "-a") == 0))
+        {
+            showOnlyActive = true;
+        }
 
         OSStatus status = getDeviceList(&devices, &deviceCount);
         if (status == noErr)
         {
-            printf("发现 %d 个音频设备:\n", deviceCount);
+            // 计算活跃设备数量
+            UInt32 activeCount = 0;
+            if (showOnlyActive)
+            {
+                for (UInt32 i = 0; i < deviceCount; i++)
+                {
+                    if (devices[i].isRunning)
+                    {
+                        activeCount++;
+                    }
+                }
+            }
+
+            // 打印设备数量信息
+            if (showOnlyActive)
+            {
+                printf("发现 %d 个使用中的音频设备:\n", activeCount);
+            }
+            else
+            {
+                printf("发现 %d 个音频设备:\n", deviceCount);
+            }
+
+            // 打印设备信息
             for (UInt32 i = 0; i < deviceCount; i++)
             {
-                printDeviceInfo(&devices[i]);
+                if (!showOnlyActive || devices[i].isRunning)
+                {
+                    printDeviceInfo(&devices[i]);
+                }
             }
             free(devices);
         }
+        else
+        {
+            printf("获取设备列表失败，错误码: %d\n", (int)status);
+            return 1;
+        }
+    }
+    else
+    {
+        printf("未知命令: %s\n", argv[1]);
+        printUsage();
+        return 1;
     }
 
     return 0;
