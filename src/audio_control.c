@@ -352,7 +352,7 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
             &dataSize,
             &muteState);
 
-        info->isMuted = (status == noErr) ? (muteState != 0) : false;
+        info->isMuted = (status == noErr) ? muteState != 0 : false;
     }
     else
     {
@@ -530,7 +530,7 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
     return finalStatus;
 }
 
-const char* getTransportTypeName(UInt32 transportType)
+const char* getTransportTypeName(const UInt32 transportType)
 {
     switch (transportType)
     {
@@ -560,7 +560,7 @@ const char* getTransportTypeName(UInt32 transportType)
     }
 }
 
-const char* getFormatFlagsDescription(UInt32 formatFlags)
+const char* getFormatFlagsDescription(const UInt32 formatFlags)
 {
     if (formatFlags & kAudioFormatFlagIsFloat) return "Float";
     if (formatFlags & kAudioFormatFlagIsSignedInteger) return "Signed Integer";
