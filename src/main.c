@@ -1,16 +1,172 @@
 #include "audio_control.h"
 
+// 定义 ANSI 颜色常量
+#define ANSI_COLOR_GREEN "\x1b[32m"
+#define ANSI_COLOR_RESET "\x1b[0m"
+
+// 命令行选项和程序选项的定义
+typedef struct
+{
+    const char shortOpt;
+    const char* longOpt;
+    const char* description;
+    bool* flag;
+} CommandOption;
+
+typedef struct
+{
+    bool showOnlyActive;
+    bool showOnlyInput;
+    bool showOnlyOutput;
+    // 后续添加更多选项
+} ProgramOptions;
+
+// 创建命令行选项和程序选项的关联
+CommandOption* createCommandOptions(ProgramOptions* opts)
+{
+    static CommandOption options[] = {
+        {'a', "active", "只列出使用中的设备", NULL},
+        {'i', "input", "只列出输入设备", NULL},
+        {'o', "output", "只列出输出设备", NULL},
+        // 后续在这里添加更多选项
+        {0, NULL, NULL, NULL} // 结束标记
+    };
+
+    options[0].flag = &opts->showOnlyActive;
+    options[1].flag = &opts->showOnlyInput;
+    options[2].flag = &opts->showOnlyOutput;
+    // 后续在这里添加更多选项
+
+    return options;
+}
+
+// 打印使用帮助信息
 void printUsage()
 {
     printf("使用方法：\n");
-    printf("  audioctl [命令] [参数]\n\n");
+    printf(" audioctl [命令] [参数]\n\n");
     printf("可用命令：\n");
-    printf("  list                 - 显示所有音频设备\n");
-    printf("  list --active|-a     - 只列出使用中的音频设备\n");
+    printf(" list              - 显示所有音频设备\n");
+
+    // 创建临时选项结构来获取选项描述
+    ProgramOptions tempOpts = {0};
+    const CommandOption* options = createCommandOptions(&tempOpts);
+
+    printf("\n选项：\n");
+    for (int i = 0; options[i].shortOpt != 0; i++)
+    {
+        printf(" -%c, --%-10s - %s\n",
+               options[i].shortOpt,
+               options[i].longOpt,
+               options[i].description);
+    }
+
+    printf("\n选项可组合使用，例如：\n");
+    printf(" list -ai         - 只列出使用中的输入设备\n");
+    printf(" list -ao         - 只列出使用中的输出设备\n");
 }
 
-#define ANSI_COLOR_GREEN     "\x1b[32m"
-#define ANSI_COLOR_RESET   "\x1b[0m"
+// 解析单个短选项
+bool parseShortOption(const char opt, const CommandOption* options)
+{
+    for (int i = 0; options[i].shortOpt != 0; i++)
+    {
+        if (opt == options[i].shortOpt)
+        {
+            *options[i].flag = true;
+            return true;
+        }
+    }
+    printf("警告：未知选项: -%c\n", opt);
+    return false;
+}
+
+// 解析长选项
+bool parseLongOption(const char* arg, const CommandOption* options)
+{
+    // 跳过开头的 --
+    arg += 2;
+
+    for (int i = 0; options[i].longOpt != 0; i++)
+    {
+        if (strcmp(arg, options[i].longOpt) == 0)
+        {
+            *options[i].flag = true;
+            return true;
+        }
+    }
+    printf("警告：未知选项: --%s\n", arg);
+    return false;
+}
+
+// 解析所有参数
+bool parseOptions(const int argc, char* argv[], ProgramOptions* opts, const CommandOption* options)
+{
+    // 初始化所有选项为 false
+    memset(opts, 0, sizeof(ProgramOptions));
+
+    // 从参数2开始解析
+    for (int i = 2; i < argc; i++)
+    {
+        if (argv[i][0] == '-')
+        {
+            // 检查是否只有一个横杠
+            if (argv[i][1] == '\0')
+            {
+                printf("错误：无效的参数 '%s'\n", argv[i]);
+                printf("参数格式必须是 '-x' 或 '--option'\n");
+                printUsage();
+                return false;
+            }
+
+            if (argv[i][1] == '-')
+            {
+                // 长选项
+                if (argv[i][2] == '\0')
+                {
+                    printf("错误：无效的长参数 '%s'\n", argv[i]);
+                    printf("长参数格式必须是 '--option'\n");
+                    printUsage();
+                    return false;
+                }
+                if (!parseLongOption(argv[i], options))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // 短选项
+                const char* c = argv[i] + 1;
+                while (*c != '\0')
+                {
+                    if (!parseShortOption(*c, options))
+                    {
+                        return false;
+                    }
+                    c++;
+                }
+            }
+        }
+        else
+        {
+            printf("错误：无效的参数 '%s'\n", argv[i]);
+            printf("所有参数必须以 '-' 或 '--' 开头\n");
+            printUsage();
+            return false;
+        }
+    }
+
+    // 验证选项组合的有效性
+    if (opts->showOnlyInput && opts->showOnlyOutput)
+    {
+        printf("错误：不能同时指定输入和输出设备\n");
+        printUsage();
+        return false;
+    }
+
+    return true;
+}
 
 void printDeviceInfo(const AudioDeviceInfo* info)
 {
@@ -76,7 +232,7 @@ void printDeviceInfo(const AudioDeviceInfo* info)
     printf("\n\n");
 }
 
-int main(int argc, char* argv[])
+int main(const int argc, char* argv[])
 {
     if (argc < 2)
     {
@@ -86,55 +242,85 @@ int main(int argc, char* argv[])
 
     if (strcmp(argv[1], "list") == 0)
     {
-        AudioDeviceInfo* devices;
-        UInt32 deviceCount;
-        bool showOnlyActive = false;
+        ProgramOptions opts;
+        const CommandOption* options = createCommandOptions(&opts);
 
-        // 检查是否有 --active 或 -a 参数
-        if (argc > 2 && (strcmp(argv[2], "--active") == 0 || strcmp(argv[2], "-a") == 0))
+        if (!parseOptions(argc, argv, &opts, options))
         {
-            showOnlyActive = true;
+            return 1;
         }
 
-        OSStatus status = getDeviceList(&devices, &deviceCount);
+        AudioDeviceInfo* devices;
+        UInt32 deviceCount;
+
+        const OSStatus status = getDeviceList(&devices, &deviceCount);
         if (status == noErr)
         {
-            // 计算活跃设备数量
-            UInt32 activeCount = 0;
-            if (showOnlyActive)
+            // 计算符合条件的设备数量
+            UInt32 matchedCount = 0;
+            for (UInt32 i = 0; i < deviceCount; i++)
             {
-                for (UInt32 i = 0; i < deviceCount; i++)
+                // 首先检查活跃状态
+                if (opts.showOnlyActive && !devices[i].isRunning)
                 {
-                    if (devices[i].isRunning)
-                    {
-                        activeCount++;
-                    }
+                    continue;
                 }
+
+                // 然后检查设备类型
+                if (opts.showOnlyInput && devices[i].deviceType != kDeviceTypeInput)
+                {
+                    continue;
+                }
+                if (opts.showOnlyOutput && devices[i].deviceType != kDeviceTypeOutput)
+                {
+                    continue;
+                }
+
+                matchedCount++;
             }
 
             // 打印设备数量信息
-            if (showOnlyActive)
+            printf("发现 %d 个", matchedCount);
+            if (opts.showOnlyActive)
             {
-                printf("发现 %d 个使用中的音频设备:\n", activeCount);
+                printf("使用中的");
             }
-            else
+            if (opts.showOnlyInput)
             {
-                printf("发现 %d 个音频设备:\n", deviceCount);
+                printf("输入");
             }
+            else if (opts.showOnlyOutput)
+            {
+                printf("输出");
+            }
+            printf("音频设备:\n");
 
             // 打印设备信息
             for (UInt32 i = 0; i < deviceCount; i++)
             {
-                if (!showOnlyActive || devices[i].isRunning)
+                // 首先检查活跃状态
+                if (opts.showOnlyActive && !devices[i].isRunning)
                 {
-                    printDeviceInfo(&devices[i]);
+                    continue;
                 }
+
+                // 然后检查设备类型
+                if (opts.showOnlyInput && devices[i].deviceType != kDeviceTypeInput)
+                {
+                    continue;
+                }
+                if (opts.showOnlyOutput && devices[i].deviceType != kDeviceTypeOutput)
+                {
+                    continue;
+                }
+
+                printDeviceInfo(&devices[i]);
             }
             free(devices);
         }
         else
         {
-            printf("获取设备列表失败，错误码: %d\n", status);
+            printf("获取设备列表失败，错误码: %d\n", (int)status);
             return 1;
         }
     }
