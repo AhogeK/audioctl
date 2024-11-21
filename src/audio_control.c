@@ -7,7 +7,7 @@
 OSStatus getDeviceList(AudioDeviceInfo** devices, UInt32* deviceCount)
 {
     // 获取设备数量
-    AudioObjectPropertyAddress propertyAddress = {
+    const AudioObjectPropertyAddress propertyAddress = {
         kAudioHardwarePropertyDevices,
         kAudioObjectPropertyScopeGlobal,
         kAudioObjectPropertyElementMain
@@ -66,17 +66,6 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
     // 初始化结构体，设置默认值
     memset(info, 0, sizeof(AudioDeviceInfo));
     info->deviceId = deviceId;
-    info->volume = 0.0f;
-    info->isMuted = false;
-    info->deviceType = kDeviceTypeUnknown;
-    info->inputChannelCount = 0;
-    info->outputChannelCount = 0;
-    info->channelCount = 0;
-    info->bitsPerChannel = 0;
-    info->formatFlags = 0;
-    info->transportType = 0;
-    info->isRunning = false;
-    info->hasVolumeControl = false;
     strcpy(info->name, "Unknown Device");
 
     // 获取设备名称
@@ -87,7 +76,7 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
     };
 
     CFStringRef deviceName;
-    dataSize = sizeof(deviceName);
+    dataSize = sizeof(CFStringRef);
 
     status = AudioObjectGetPropertyData(
         deviceId,
@@ -125,7 +114,7 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
 
     if (status == noErr && inputDataSize > 0)
     {
-        AudioBufferList* bufferList = (AudioBufferList*)malloc(inputDataSize);
+        AudioBufferList* bufferList = malloc(inputDataSize);
         if (bufferList)
         {
             status = AudioObjectGetPropertyData(
@@ -160,7 +149,7 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
 
     if (status == noErr && outputDataSize > 0)
     {
-        AudioBufferList* bufferList = (AudioBufferList*)malloc(outputDataSize);
+        AudioBufferList* bufferList = malloc(outputDataSize);
         if (bufferList)
         {
             status = AudioObjectGetPropertyData(

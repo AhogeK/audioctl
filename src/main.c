@@ -9,7 +9,7 @@ void printUsage()
     printf("  list --active|-a     - 只列出使用中的音频设备\n");
 }
 
-#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN     "\x1b[32m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
 void printDeviceInfo(const AudioDeviceInfo* info)
@@ -70,7 +70,7 @@ void printDeviceInfo(const AudioDeviceInfo* info)
         printf(", 格式: %s", getFormatFlagsDescription(info->formatFlags));
     }
     printf(", 状态: %s%s%s",
-           info->isRunning ? ANSI_COLOR_RED : "",
+           info->isRunning ? ANSI_COLOR_GREEN : "",
            info->isRunning ? "使用中" : "空闲",
            info->isRunning ? ANSI_COLOR_RESET : "");
     printf("\n\n");
@@ -134,7 +134,7 @@ int main(int argc, char* argv[])
         }
         else
         {
-            printf("获取设备列表失败，错误码: %d\n", (int)status);
+            printf("获取设备列表失败，错误码: %d\n", status);
             return 1;
         }
     }
