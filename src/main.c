@@ -1,4 +1,5 @@
 #include "audio_control.h"
+#include "audio_apps.h"
 
 // 定义 ANSI 颜色常量
 #define ANSI_COLOR_GREEN "\x1b[32m"
@@ -321,6 +322,30 @@ int main(const int argc, char* argv[])
         else
         {
             printf("获取设备列表失败，错误码: %d\n", (int)status);
+            return 1;
+        }
+    }
+    else if (strcmp(argv[1], "apps") == 0)
+    {
+        AudioAppInfo* apps;
+        UInt32 appCount;
+
+        const OSStatus status = getAudioApps(&apps, &appCount);
+        if (status == noErr)
+        {
+            printf("发现 %d 个正在使用音频的应用程序:\n\n", appCount);
+
+            for (UInt32 i = 0; i < appCount; i++)
+            {
+                printf("应用: %s (PID: %d)\n", apps[i].name, apps[i].pid);
+                printf("音量: %.0f%%\n", apps[i].volume * 100);
+            }
+
+            freeAudioApps(apps);
+        }
+        else
+        {
+            printf("获取应用程序音频信息失败，错误码: %d\n", (int)status);
             return 1;
         }
     }

@@ -3,6 +3,7 @@
 //
 
 #include "audio_control.h"
+#include <CoreAudio/CoreAudio.h>
 
 OSStatus getDeviceList(AudioDeviceInfo** devices, UInt32* deviceCount)
 {
@@ -24,7 +25,7 @@ OSStatus getDeviceList(AudioDeviceInfo** devices, UInt32* deviceCount)
     if (status != noErr) return status;
 
     // 分配内存并获取设备列表
-    UInt32 numDevices = dataSize / sizeof(AudioDeviceID); // 改用不同的变量名
+    const UInt32 numDevices = dataSize / sizeof(AudioDeviceID); // 改用不同的变量名
     AudioDeviceID* deviceIds = malloc(dataSize);
 
     status = AudioObjectGetPropertyData(
@@ -373,7 +374,7 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info)
         &dataSize,
         &sampleRate);
 
-    info->sampleRate = (status == noErr) ? (UInt32)sampleRate : 0;
+    info->sampleRate = status == noErr ? (UInt32)sampleRate : 0;
 
     // 获取数据格式
     propertyAddress.mSelector = kAudioDevicePropertyStreamFormat;
