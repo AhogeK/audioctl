@@ -16,9 +16,9 @@ typedef struct {
 } AudioAppInfo;
 
 // 获取正在使用音频的应用程序列表
-OSStatus getAudioApps(AudioAppInfo** apps, UInt32* appCount);
+OSStatus getAudioApps(AudioAppInfo **apps, UInt32 *appCount);
 
 // 释放应用程序列表内存
-void freeAudioApps(AudioAppInfo* apps);
+void freeAudioApps(AudioAppInfo *apps);
 
 #endif //AUDIO_APPS_H

@@ -6,16 +6,14 @@
 
 #include <AudioToolbox/AudioToolbox.h>
 
-typedef enum
-{
+typedef enum {
     kDeviceTypeUnknown = 0,
     kDeviceTypeInput = 1,
     kDeviceTypeOutput = 2,
     kDeviceTypeInputOutput = 3
 } AudioDeviceType;
 
-typedef struct
-{
+typedef struct {
     AudioDeviceID deviceId;
     char name[256];
     Float32 volume;
@@ -33,11 +31,13 @@ typedef struct
 } AudioDeviceInfo;
 
 // 核心功能函数声明
-OSStatus getDeviceList(AudioDeviceInfo** devices, UInt32* deviceCount);
-OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo* info);
+OSStatus getDeviceList(AudioDeviceInfo **devices, UInt32 *deviceCount);
+
+OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo *info);
 
 // 辅助函数声明
-const char* getTransportTypeName(UInt32 transportType);
-const char* getFormatFlagsDescription(UInt32 formatFlags);
+const char *getTransportTypeName(UInt32 transportType);
+
+const char *getFormatFlagsDescription(UInt32 formatFlags);
 
 #endif //AUDIO_CONTROL_H
