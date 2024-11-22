@@ -11,7 +11,7 @@ typedef struct {
     const char shortOpt;
     const char *longOpt;
     const char *description;
-    bool *flag;
+    size_t flagOffset;  // 使用偏移量代替直接指针
 } CommandOption;
 
 typedef struct {
@@ -22,20 +22,14 @@ typedef struct {
 } ProgramOptions;
 
 // 创建命令行选项和程序选项的关联
-CommandOption *createCommandOptions(ProgramOptions *opts) {
-    static CommandOption options[] = {
-            {'a', "active", "只列出使用中的设备", NULL},
-            {'i', "input",  "只列出输入设备",     NULL},
-            {'o', "output", "只列出输出设备",     NULL},
+static const CommandOption *getCommandOptions(void) {
+    static const CommandOption options[] = {
+            {'a', "active", "只列出使用中的设备", offsetof(ProgramOptions, showOnlyActive)},
+            {'i', "input",  "只列出输入设备",     offsetof(ProgramOptions, showOnlyInput)},
+            {'o', "output", "只列出输出设备",     offsetof(ProgramOptions, showOnlyOutput)},
             // 后续在这里添加更多选项
-            {0, NULL, NULL,                       NULL} // 结束标记
+            {0, NULL, NULL, 0} // 结束标记
     };
-
-    options[0].flag = &opts->showOnlyActive;
-    options[1].flag = &opts->showOnlyInput;
-    options[2].flag = &opts->showOnlyOutput;
-    // 后续在这里添加更多选项
-
     return options;
 }
 
@@ -44,11 +38,10 @@ void printUsage() {
     printf("使用方法：\n");
     printf(" audioctl [命令] [参数]\n\n");
     printf("可用命令：\n");
-    printf(" list              - 显示所有音频设备\n");
+    printf(" list - 显示所有音频设备\n");
 
-    // 创建临时选项结构来获取选项描述
-    ProgramOptions tempOpts = {0};
-    const CommandOption *options = createCommandOptions(&tempOpts);
+    // 使用专门用于显示帮助的选项数组
+    const CommandOption *options = getCommandOptions();
 
     printf("\n选项：\n");
     for (int i = 0; options[i].shortOpt != 0; i++) {
@@ -59,15 +52,17 @@ void printUsage() {
     }
 
     printf("\n选项可组合使用，例如：\n");
-    printf(" list -ai         - 只列出使用中的输入设备\n");
-    printf(" list -ao         - 只列出使用中的输出设备\n");
+    printf(" list -ai - 只列出使用中的输入设备\n");
+    printf(" list -ao - 只列出使用中的输出设备\n");
 }
 
 // 解析单个短选项
-bool parseShortOption(const char opt, const CommandOption *options) {
+bool parseShortOption(const char opt, const CommandOption *options, ProgramOptions *opts) {
     for (int i = 0; options[i].shortOpt != 0; i++) {
         if (opt == options[i].shortOpt) {
-            *options[i].flag = true;
+            // 使用偏移量设置对应的标志位
+            bool *flag = (bool *) ((char *) opts + options[i].flagOffset);
+            *flag = true;
             return true;
         }
     }
@@ -76,13 +71,15 @@ bool parseShortOption(const char opt, const CommandOption *options) {
 }
 
 // 解析长选项
-bool parseLongOption(const char *arg, const CommandOption *options) {
+bool parseLongOption(const char *arg, const CommandOption *options, ProgramOptions *opts) {
     // 跳过开头的 --
     arg += 2;
 
     for (int i = 0; options[i].longOpt != 0; i++) {
         if (strcmp(arg, options[i].longOpt) == 0) {
-            *options[i].flag = true;
+            // 使用偏移量设置对应的标志位
+            bool *flag = (bool *) ((char *) opts + options[i].flagOffset);
+            *flag = true;
             return true;
         }
     }
@@ -90,59 +87,80 @@ bool parseLongOption(const char *arg, const CommandOption *options) {
     return false;
 }
 
-// 解析所有参数
-bool parseOptions(const int argc, char *argv[], ProgramOptions *opts, const CommandOption *options) {
-    // 初始化所有选项为 false
-    memset(opts, 0, sizeof(ProgramOptions));
-
-    // 从参数2开始解析
-    for (int i = 2; i < argc; i++) {
-        if (argv[i][0] == '-') {
-            // 检查是否只有一个横杠
-            if (argv[i][1] == '\0') {
-                printf("错误：无效的参数 '%s'\n", argv[i]);
-                printf("参数格式必须是 '-x' 或 '--option'\n");
-                printUsage();
-                return false;
-            }
-
-            if (argv[i][1] == '-') {
-                // 长选项
-                if (argv[i][2] == '\0') {
-                    printf("错误：无效的长参数 '%s'\n", argv[i]);
-                    printf("长参数格式必须是 '--option'\n");
-                    printUsage();
-                    return false;
-                }
-                if (!parseLongOption(argv[i], options)) {
-                    return false;
-                }
-            } else {
-                // 短选项
-                const char *c = argv[i] + 1;
-                while (*c != '\0') {
-                    if (!parseShortOption(*c, options)) {
-                        return false;
-                    }
-                    c++;
-                }
-            }
-        } else {
-            printf("错误：无效的参数 '%s'\n", argv[i]);
-            printf("所有参数必须以 '-' 或 '--' 开头\n");
-            printUsage();
-            return false;
-        }
-    }
-
-    // 验证选项组合的有效性
+// 验证选项组合的有效性
+static bool validateOptionCombination(const ProgramOptions *opts) {
     if (opts->showOnlyInput && opts->showOnlyOutput) {
         printf("错误：不能同时指定输入和输出设备\n");
         printUsage();
         return false;
     }
+    return true;
+}
+
+// 处理无效参数
+static bool handleInvalidArgument(const char *arg, bool isLongOption) {
+    if (isLongOption) {
+        printf("错误：无效的长参数 '%s'\n", arg);
+        printf("长参数格式必须是 '--option'\n");
+    } else {
+        printf("错误：无效的参数 '%s'\n", arg);
+        printf("参数格式必须是 '-x' 或 '--option'\n");
+    }
+    printUsage();
+    return false;
+}
+
+// 处理单个参数
+static bool handleArgument(const char *arg, const CommandOption *options, ProgramOptions *opts) {
+    // 检查是否是选项参数
+    if (arg[0] != '-') {
+        printf("错误：无效的参数 '%s'\n", arg);
+        printf("所有参数必须以 '-' 或 '--' 开头\n");
+        printUsage();
+        return false;
+    }
+
+    // 检查是否只有一个横杠
+    if (arg[1] == '\0') {
+        return handleInvalidArgument(arg, false);
+    }
+
+    // 处理长选项
+    if (arg[1] == '-') {
+        if (arg[2] == '\0') {
+            return handleInvalidArgument(arg, true);
+        }
+        return parseLongOption(arg, options, opts);
+    }
+
+    // 处理短选项
+    const char *c = arg + 1;
+    while (*c != '\0') {
+        if (!parseShortOption(*c, options, opts)) {
+            return false;
+        }
+        c++;
+    }
 
     return true;
+}
+
+// 解析所有参数
+bool parseOptions(const int argc, char *argv[], ProgramOptions *opts) {
+    // 初始化所有选项为 false
+    memset(opts, 0, sizeof(ProgramOptions));
+
+    const CommandOption *options = getCommandOptions();
+
+    // 从参数2开始解析
+    for (int i = 2; i < argc; i++) {
+        if (!handleArgument(argv[i], options, opts)) {
+            return false;
+        }
+    }
+
+    // 验证选项组合的有效性
+    return validateOptionCombination(opts);
 }
 
 void printDeviceInfo(const AudioDeviceInfo *info) {
@@ -197,104 +215,135 @@ void printDeviceInfo(const AudioDeviceInfo *info) {
     printf("\n\n");
 }
 
+// 处理版本命令
+static bool handleVersionCommand(const char *arg) {
+    if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
+        print_version();
+        return true;
+    }
+    return false;
+}
+
+// 打印匹配的设备数量信息
+static void printMatchedDeviceCount(UInt32 matchedCount, const ProgramOptions *opts) {
+    printf("发现 %d 个", matchedCount);
+    if (opts->showOnlyActive) {
+        printf("使用中的");
+    }
+    if (opts->showOnlyInput) {
+        printf("输入");
+    } else if (opts->showOnlyOutput) {
+        printf("输出");
+    }
+    printf("音频设备:\n");
+}
+
+// 检查设备是否匹配过滤条件
+static bool isDeviceMatched(const AudioDeviceInfo *device, const ProgramOptions *opts) {
+    // 检查活跃状态
+    if (opts->showOnlyActive && !device->isRunning) {
+        return false;
+    }
+
+    // 检查设备类型
+    if (opts->showOnlyInput && device->deviceType != kDeviceTypeInput) {
+        return false;
+    }
+    if (opts->showOnlyOutput && device->deviceType != kDeviceTypeOutput) {
+        return false;
+    }
+
+    return true;
+}
+
+// 计算匹配的设备数量
+static UInt32 countMatchedDevices(const AudioDeviceInfo *devices, UInt32 deviceCount,
+                                  const ProgramOptions *opts) {
+    UInt32 matchedCount = 0;
+    for (UInt32 i = 0; i < deviceCount; i++) {
+        if (isDeviceMatched(&devices[i], opts)) {
+            matchedCount++;
+        }
+    }
+    return matchedCount;
+}
+
+// 处理设备列表命令
+static int handleListCommand(int argc, char *argv[]) {
+    ProgramOptions opts;
+    if (!parseOptions(argc, argv, &opts)) {
+        return 1;
+    }
+
+    AudioDeviceInfo *devices;
+    UInt32 deviceCount;
+    const OSStatus status = getDeviceList(&devices, &deviceCount);
+
+    if (status != noErr) {
+        printf("获取设备列表失败，错误码: %d\n", status);  // 移除了多余的类型转换
+        return 1;
+    }
+
+    // 计算并显示匹配的设备数量
+    UInt32 matchedCount = countMatchedDevices(devices, deviceCount, &opts);
+    printMatchedDeviceCount(matchedCount, &opts);
+
+    // 打印设备信息
+    for (UInt32 i = 0; i < deviceCount; i++) {
+        if (isDeviceMatched(&devices[i], &opts)) {
+            printDeviceInfo(&devices[i]);
+        }
+    }
+
+    free(devices);
+    return 0;
+}
+
+
+// 处理应用程序音频信息命令
+static int handleAppsCommand(void) {
+    AudioAppInfo *apps;
+    UInt32 appCount;
+    const OSStatus status = getAudioApps(&apps, &appCount);
+
+    if (status != noErr) {
+        printf("获取应用程序音频信息失败，错误码: %d\n", status);
+        return 1;
+    }
+
+    printf("发现 %d 个正在使用音频的应用程序:\n\n", appCount);
+    for (UInt32 i = 0; i < appCount; i++) {
+        printf("应用: %s (PID: %d)\n", apps[i].name, apps[i].pid);
+        printf("音量: %.0f%%\n", apps[i].volume * 100);
+    }
+
+    freeAudioApps(apps);
+    return 0;
+}
+
+// 主函数
 int main(const int argc, char *argv[]) {
     if (argc < 2) {
         printUsage();
         return 1;
     }
 
-    if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
-        print_version();
+    // 处理版本命令
+    if (handleVersionCommand(argv[1])) {
         return 0;
-    } else if (strcmp(argv[1], "list") == 0) {
-        ProgramOptions opts;
-        const CommandOption *options = createCommandOptions(&opts);
-
-        if (!parseOptions(argc, argv, &opts, options)) {
-            return 1;
-        }
-
-        AudioDeviceInfo *devices;
-        UInt32 deviceCount;
-
-        const OSStatus status = getDeviceList(&devices, &deviceCount);
-        if (status == noErr) {
-            // 计算符合条件的设备数量
-            UInt32 matchedCount = 0;
-            for (UInt32 i = 0; i < deviceCount; i++) {
-                // 首先检查活跃状态
-                if (opts.showOnlyActive && !devices[i].isRunning) {
-                    continue;
-                }
-
-                // 然后检查设备类型
-                if (opts.showOnlyInput && devices[i].deviceType != kDeviceTypeInput) {
-                    continue;
-                }
-                if (opts.showOnlyOutput && devices[i].deviceType != kDeviceTypeOutput) {
-                    continue;
-                }
-
-                matchedCount++;
-            }
-
-            // 打印设备数量信息
-            printf("发现 %d 个", matchedCount);
-            if (opts.showOnlyActive) {
-                printf("使用中的");
-            }
-            if (opts.showOnlyInput) {
-                printf("输入");
-            } else if (opts.showOnlyOutput) {
-                printf("输出");
-            }
-            printf("音频设备:\n");
-
-            // 打印设备信息
-            for (UInt32 i = 0; i < deviceCount; i++) {
-                // 首先检查活跃状态
-                if (opts.showOnlyActive && !devices[i].isRunning) {
-                    continue;
-                }
-
-                // 然后检查设备类型
-                if (opts.showOnlyInput && devices[i].deviceType != kDeviceTypeInput) {
-                    continue;
-                }
-                if (opts.showOnlyOutput && devices[i].deviceType != kDeviceTypeOutput) {
-                    continue;
-                }
-
-                printDeviceInfo(&devices[i]);
-            }
-            free(devices);
-        } else {
-            printf("获取设备列表失败，错误码: %d\n", (int) status);
-            return 1;
-        }
-    } else if (strcmp(argv[1], "apps") == 0) {
-        AudioAppInfo *apps;
-        UInt32 appCount;
-
-        const OSStatus status = getAudioApps(&apps, &appCount);
-        if (status == noErr) {
-            printf("发现 %d 个正在使用音频的应用程序:\n\n", appCount);
-
-            for (UInt32 i = 0; i < appCount; i++) {
-                printf("应用: %s (PID: %d)\n", apps[i].name, apps[i].pid);
-                printf("音量: %.0f%%\n", apps[i].volume * 100);
-            }
-
-            freeAudioApps(apps);
-        } else {
-            printf("获取应用程序音频信息失败，错误码: %d\n", (int) status);
-            return 1;
-        }
-    } else {
-        printf("未知命令: %s\n", argv[1]);
-        printUsage();
-        return 1;
     }
 
-    return 0;
+    // 处理主要命令
+    if (strcmp(argv[1], "list") == 0) {
+        return handleListCommand(argc, argv);
+    }
+
+    if (strcmp(argv[1], "apps") == 0) {
+        return handleAppsCommand();
+    }
+
+    // 处理未知命令
+    printf("未知命令: %s\n", argv[1]);
+    printUsage();
+    return 1;
 }
