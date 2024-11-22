@@ -53,7 +53,10 @@
         return audioApps;
     }
 
-    AudioBufferList *bufferList = (AudioBufferList *) malloc(propertySize);
+    // 修改：使用 NSMutableData 来管理内存，避免手动管理
+    NSMutableData *bufferData = [NSMutableData dataWithLength:propertySize];
+    AudioBufferList *bufferList = (AudioBufferList *) bufferData.mutableBytes;
+
     if (bufferList == NULL) {
         return audioApps;
     }
@@ -112,7 +115,7 @@
         }
     }
 
-    free(bufferList);
+    // 不需要手动 free，NSMutableData 会自动管理内存
     return audioApps;
 }
 
@@ -120,6 +123,11 @@
 
 OSStatus getAudioApps(AudioAppInfo **apps, UInt32 *appCount) {
     @autoreleasepool {
+        // 添加参数验证
+        if (apps == NULL || appCount == NULL) {
+            return paramErr;
+        }
+
         NSArray *audioApps = [AudioAppManager getRunningAudioApps];
         *appCount = (UInt32) [audioApps count];
 
@@ -128,6 +136,7 @@ OSStatus getAudioApps(AudioAppInfo **apps, UInt32 *appCount) {
             return noErr;
         }
 
+        // 使用 calloc 确保内存初始化为 0
         *apps = (AudioAppInfo *) calloc(*appCount, sizeof(AudioAppInfo));
         if (*apps == NULL) {
             return memFullErr;
@@ -137,15 +146,21 @@ OSStatus getAudioApps(AudioAppInfo **apps, UInt32 *appCount) {
             NSRunningApplication *app = audioApps[i];
             AudioAppInfo *info = &(*apps)[i];
 
-            // 复制 Bundle ID
-            [app.bundleIdentifier getCString:info->bundleId
-                                   maxLength:sizeof(info->bundleId)
-                                    encoding:NSUTF8StringEncoding];
+            // 添加安全检查
+            if (app.bundleIdentifier == nil || app.localizedName == nil) {
+                continue;
+            }
 
-            // 复制应用名称
+            // 使用安全的字符串复制
+            [app.bundleIdentifier getCString:info->bundleId
+                                   maxLength:sizeof(info->bundleId) - 1  // 保留结尾的 null 字符空间
+                                    encoding:NSUTF8StringEncoding];
+            info->bundleId[sizeof(info->bundleId) - 1] = '\0';  // 确保字符串结束
+
             [app.localizedName getCString:info->name
-                                maxLength:sizeof(info->name)
+                                maxLength:sizeof(info->name) - 1
                                  encoding:NSUTF8StringEncoding];
+            info->name[sizeof(info->name) - 1] = '\0';
 
             // 设置进程 ID
             info->pid = app.processIdentifier;
