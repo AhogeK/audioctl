@@ -12,6 +12,19 @@ set(CMAKE_OBJC_STANDARD_REQUIRED ON)
 # 设置最低 macOS 版本为 10.0
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.0" CACHE STRING "Minimum OS X deployment version")
 
+option(DEBUG_MODE "Enable debug mode" ON)
+
+add_compile_options(-Wall -Wextra)
+
+if (DEBUG_MODE)
+    add_compile_definitions(DEBUG)
+    add_compile_options(-g -O0)
+    message(STATUS "Building in DEBUG mode")
+else ()
+    add_compile_definitions(-O2)
+    message(STATUS "Building in RELEASE mode")
+endif ()
+
 # 添加项目的 include 目录
 include_directories(
         "${CMAKE_SOURCE_DIR}/include"

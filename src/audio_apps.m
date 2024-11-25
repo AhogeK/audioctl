@@ -72,8 +72,6 @@
         // 检查每个运行的应用是否在使用音频
         for (NSRunningApplication *app in runningApps) {
             if (app.activationPolicy == NSApplicationActivationPolicyRegular) {
-                pid_t pid = app.processIdentifier;
-
                 // 检查进程是否在使用音频设备
                 AudioObjectPropertyAddress processAddress = {
                         .mSelector = kAudioDevicePropertyDeviceIsAlive,

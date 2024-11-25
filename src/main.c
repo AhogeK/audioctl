@@ -342,6 +342,20 @@ int main(const int argc, char *argv[]) {
         return handleAppsCommand();
     }
 
+    if (strcmp(argv[1], "--start-service") == 0) {
+        ServiceStatus status = service_start();
+        return (status == SERVICE_STATUS_SUCCESS || status == SERVICE_STATUS_ALREADY_RUNNING) ? 0 : 1;
+    }
+
+    if (strcmp(argv[1], "--stop-service") == 0) {
+        ServiceStatus status = service_stop();
+        return (status == SERVICE_STATUS_SUCCESS || status == SERVICE_STATUS_NOT_RUNNING) ? 0 : 1;
+    }
+
+    if (strcmp(argv[1], "--restart-service") == 0) {
+        return service_restart() == SERVICE_STATUS_SUCCESS ? 0 : 1;
+    }
+
     // 处理未知命令
     printf("未知命令: %s\n", argv[1]);
     printUsage();
