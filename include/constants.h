@@ -34,4 +34,11 @@
 #define DIR_MODE (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) //755
 #define FILE_MODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) //644
 
+// 定义 ANSI 颜色常量
+#define ANSI_COLOR_GREEN "\x1b[32m"
+#define ANSI_COLOR_BOLD_GREEN "\033[1;32m"
+#define ANSI_COLOR_BOLD_RED "\033[1;31m"
+#define ANSI_COLOR_RESET "\x1b[0m"
+
+
 #endif //AUDIOCTL_CONSTANTS_H

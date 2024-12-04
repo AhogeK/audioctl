@@ -13,12 +13,14 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <signal.h>
-#include <sys/stat.h>
-#include <sys/fcntl.h>
 #include <stdbool.h>
-#include <sys/resource.h>
 #include <pwd.h>
 #include <grp.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/fcntl.h>
 
 #ifndef NULL
 #define NULL ((void *)0)
@@ -45,5 +47,7 @@ bool service_is_running(void);
 bool check_root_privileges(void);
 
 void print_version(void);
+
+void print_service_status(void);
 
 #endif //AUDIOCTL_SERVICE_MANAGER_H

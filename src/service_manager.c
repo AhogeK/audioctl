@@ -29,7 +29,7 @@ static int ensure_single_directory(int parent_fd, const char *name) {
 
     // 使用 getpwnam_r 获取用户信息
     struct passwd pw;
-    struct passwd *pw_result;
+    struct passwd *pw_result = NULL;
     char pw_buffer[1024];
     if (getpwnam_r(SERVICE_USER, &pw, pw_buffer, sizeof(pw_buffer), &pw_result) != 0 || pw_result == NULL) {
         fprintf(stderr, "无法获取用户信息\n");
@@ -407,3 +407,64 @@ bool check_root_privileges(void) {
     return (getuid() == 0);
 }
 
+void print_service_status(void) {
+    pid_t pid = read_pid_file();
+    bool is_running = service_is_running();
+
+    printf("%s 服务状态：\n", SERVICE_NAME);
+
+    if (is_running) {
+        printf("● %s - 版本 %s\n", SERVICE_NAME, SERVICE_VERSION);
+        printf("状态：" ANSI_COLOR_BOLD_GREEN "运行中" ANSI_COLOR_RESET "(PID: %d)\n", pid);
+
+        // 使用 sysctl 获取进程启动时间
+        struct kinfo_proc proc_info;
+        size_t proc_info_size = sizeof(proc_info);
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+
+        if (sysctl(mib, 4, &proc_info, &proc_info_size, NULL, 0) == 0) {
+            time_t start_time = proc_info.kp_proc.p_un.__p_starttime.tv_sec;
+            char time_str[100];
+            struct tm tm_info;
+            localtime_r(&start_time, &tm_info);
+            strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+            printf("启动时间：%s\n", time_str);
+        }
+
+        // 检查日志文件
+        struct stat log_stat;
+        if (stat(LOG_FILE, &log_stat) == 0) {
+            printf("日志文件：%s\n", LOG_FILE);
+            printf("日志大小：%.2f KB\n", (float) log_stat.st_size / 1024);
+        }
+
+        // 显示运行目录信息
+        printf("PID 文件：%s\n", PID_FILE);
+        printf("运行目录：%s\n", SERVICE_RUN_DIR);
+        printf("日志目录：%s\n", SERVICE_LOG_DIR);
+    } else {
+        printf("● %s - 版本 %s\n", SERVICE_NAME, SERVICE_VERSION);
+        printf("状态：" ANSI_COLOR_BOLD_RED "未运行" ANSI_COLOR_RESET "\n");
+
+        // 检查目录是否存在
+        struct stat dir_stat;
+        if (stat(SERVICE_RUN_DIR, &dir_stat) == 0) {
+            printf("运行目录：%s（已存在）\n", SERVICE_RUN_DIR);
+        } else {
+            printf("运行目录：%s（未创建）\n", SERVICE_RUN_DIR);
+        }
+
+        if (stat(SERVICE_LOG_DIR, &dir_stat) == 0) {
+            printf("日志目录：%s（已存在）\n", SERVICE_LOG_DIR);
+        } else {
+            printf("日志目录：%s（未创建）\n", SERVICE_LOG_DIR);
+        }
+    }
+
+    // 显示权限信息
+    printf("\n权限信息：\n");
+    printf("运行用户：%s\n", SERVICE_USER);
+    printf("运行用户组：%s\n", SERVICE_GROUP);
+    printf("目录权限：%o\n", DIR_MODE);
+    printf("文件权限：%o\n", FILE_MODE);
+}

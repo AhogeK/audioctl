@@ -1,10 +1,7 @@
 #include "audio_control.h"
 #include "audio_apps.h"
 #include "service_manager.h"
-
-// 定义 ANSI 颜色常量
-#define ANSI_COLOR_GREEN "\x1b[32m"
-#define ANSI_COLOR_RESET "\x1b[0m"
+#include "constants.h"
 
 // 命令行选项和程序选项的定义
 typedef struct {
@@ -38,14 +35,20 @@ void printUsage() {
     printf("使用方法：\n");
     printf(" audioctl [命令] [参数]\n\n");
     printf("可用命令：\n");
-    printf(" list - 显示所有音频设备\n");
+    printf(" help               - 显示帮助信息\n");
+    printf(" list               - 显示所有音频设备\n\n");
+    printf(" --version, -v      - 显示版本信息\n\n");
+    printf(" --start-service    - 启动服务\n");
+    printf(" --stop-service     - 停止服务\n");
+    printf(" --restart-service  - 重启服务\n");
+    printf(" --service-status   - 查看服务状态\n\n");
 
     // 使用专门用于显示帮助的选项数组
     const CommandOption *options = getCommandOptions();
 
     printf("\n选项：\n");
     for (int i = 0; options[i].shortOpt != 0; i++) {
-        printf(" -%c, --%-10s - %s\n",
+        printf(" -%c, --%-12s - %s\n",
                options[i].shortOpt,
                options[i].longOpt,
                options[i].description);
@@ -334,6 +337,11 @@ int main(const int argc, char *argv[]) {
     }
 
     // 处理主要命令
+    if (strcmp(argv[1], "help") == 0) {
+        printUsage();
+        return 0;
+    }
+
     if (strcmp(argv[1], "list") == 0) {
         return handleListCommand(argc, argv);
     }
@@ -354,6 +362,11 @@ int main(const int argc, char *argv[]) {
 
     if (strcmp(argv[1], "--restart-service") == 0) {
         return service_restart() == SERVICE_STATUS_SUCCESS ? 0 : 1;
+    }
+
+    if (strcmp(argv[1], "--service-status") == 0) {
+        print_service_status();
+        return 0;
     }
 
     // 处理未知命令
