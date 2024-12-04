@@ -15,15 +15,17 @@ typedef struct {
     bool showOnlyActive;
     bool showOnlyInput;
     bool showOnlyOutput;
+    bool setInputVolume;
+    bool setOutputVolume;
     // 后续添加更多选项
 } ProgramOptions;
 
 // 创建命令行选项和程序选项的关联
 static const CommandOption *getCommandOptions(void) {
     static const CommandOption options[] = {
-            {'a', "active", "只列出使用中的设备", offsetof(ProgramOptions, showOnlyActive)},
-            {'i', "input",  "只列出输入设备",     offsetof(ProgramOptions, showOnlyInput)},
-            {'o', "output", "只列出输出设备",     offsetof(ProgramOptions, showOnlyOutput)},
+            {'a', "active", "只列出使用中的设备",               offsetof(ProgramOptions, showOnlyActive)},
+            {'i', "input",  "只列出输入设备或设置输入设备音量", offsetof(ProgramOptions, showOnlyInput)},
+            {'o', "output", "只列出输出设备或设置输出设备音量", offsetof(ProgramOptions, showOnlyOutput)},
             // 后续在这里添加更多选项
             {0, NULL, NULL, 0} // 结束标记
     };
@@ -37,6 +39,8 @@ void printUsage() {
     printf("可用命令：\n");
     printf(" help               - 显示帮助信息\n");
     printf(" list               - 显示所有音频设备\n\n");
+    printf(" set -i/o [音量]     - 设置当前使用中的输入或输出设备的音量 (0-100)\n");
+    printf(" apps               - 显示所有音频应用\n\n");
     printf(" --version, -v      - 显示版本信息\n\n");
     printf(" --start-service    - 启动服务\n");
     printf(" --stop-service     - 停止服务\n");
@@ -55,8 +59,10 @@ void printUsage() {
     }
 
     printf("\n选项可组合使用，例如：\n");
-    printf(" list -ai - 只列出使用中的输入设备\n");
-    printf(" list -ao - 只列出使用中的输出设备\n");
+    printf(" list -ai          - 只列出使用中的输入设备\n");
+    printf(" list -ao          - 只列出使用中的输出设备\n");
+    printf(" set  -o 44.1 - 将当前使用中的输出设备音量设置为 44.1%%\n");
+    printf(" set  -i 50   - 将当前使用中的输入设备音量设置为 50.0%%\n");
 }
 
 // 解析单个短选项
@@ -324,6 +330,92 @@ static int handleAppsCommand(void) {
     return 0;
 }
 
+// 处理音量设置命令
+static int handleSetCommand(int argc, char *argv[]) {
+    if (argc != 4) { // 确保 argc 是 4，因为包括程序名、命令、选项和音量值
+        printf("错误：'set' 命令需要一个选项和一个音量值\n");
+        printf("用法：audioctl set -i/o [音量值]\n");
+        printf("示例：audioctl set -o 44.1\n");
+        printf(" audioctl set -i 50\n");
+        return 1;
+    }
+
+    // 验证选项
+    bool isInput = false;
+    if (strcmp(argv[2], "-i") == 0) {
+        isInput = true;
+    } else if (strcmp(argv[2], "-o") != 0) {
+        printf("错误：无效的选项 '%s'\n", argv[2]);
+        printf("选项必须是 '-i' (输入设备) 或 '-o' (输出设备)\n");
+        return 1;
+    }
+
+    // 验证音量值
+    char *endptr;
+    float volume = strtof(argv[3], &endptr);
+    if (*endptr != '\0' || volume < 0.0f || volume > 100.0f) {
+        printf("错误：音量值必须是 0 到 100 之间的数字\n");
+        return 1;
+    }
+
+    // 获取设备列表
+    AudioDeviceInfo *devices;
+    UInt32 deviceCount;
+    OSStatus status = getDeviceList(&devices, &deviceCount);
+    if (status != noErr) {
+        printf("获取设备列表失败，错误码: %d\n", status);
+        return 1;
+    }
+
+    // 找到使用中的设备
+    AudioDeviceID targetDeviceId = kAudioObjectUnknown;
+    const char *deviceName = NULL;
+    for (UInt32 i = 0; i < deviceCount; i++) {
+        if (devices[i].isRunning &&
+            ((isInput && devices[i].deviceType == kDeviceTypeInput) ||
+             (!isInput && devices[i].deviceType == kDeviceTypeOutput))) {
+            targetDeviceId = devices[i].deviceId;
+            deviceName = devices[i].name;
+            break;
+        }
+    }
+
+    if (targetDeviceId == kAudioObjectUnknown) {
+        free(devices);
+        printf("错误：没有找到使用中的%s设备\n", isInput ? "输入" : "输出");
+        return 1;
+    }
+
+    // 检查设备是否支持音量控制
+    AudioDeviceInfo const *targetDevice = NULL;
+    for (UInt32 i = 0; i < deviceCount; i++) {
+        if (devices[i].deviceId == targetDeviceId) {
+            targetDevice = &devices[i];
+            break;
+        }
+    }
+
+    if (!targetDevice || !targetDevice->hasVolumeControl) {
+        free(devices);
+        printf("错误：设备 '%s' 不支持音量控制\n", deviceName);
+        return 1;
+    }
+
+    // 设置音量
+    status = setDeviceVolume(targetDeviceId, volume / 100.0f);
+    free(devices);
+
+    if (status != noErr) {
+        printf("错误：设置%s设备 '%s' 的音量失败\n",
+               isInput ? "输入" : "输出", deviceName);
+        return 1;
+    }
+
+    printf("已将%s设备 '%s' 的音量设置为 %.2f%%\n",
+           isInput ? "输入" : "输出", deviceName, volume);
+    return 0;
+}
+
 // 主函数
 int main(const int argc, char *argv[]) {
     if (argc < 2) {
@@ -344,6 +436,10 @@ int main(const int argc, char *argv[]) {
 
     if (strcmp(argv[1], "list") == 0) {
         return handleListCommand(argc, argv);
+    }
+
+    if (strcmp(argv[1], "set") == 0) {
+        return handleSetCommand(argc, argv);
     }
 
     if (strcmp(argv[1], "apps") == 0) {

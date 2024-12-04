@@ -316,13 +316,13 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo *info) {
     // 获取设备名称
     CFStringRef deviceName;
     UInt32 dataSize = sizeof(CFStringRef);
-    if (getAudioProperty(deviceId, kAudioDevicePropertyDeviceNameCFString,
-                         kAudioObjectPropertyScopeGlobal, 0, &deviceName, &dataSize) == noErr) {
-        CFStringGetCString(deviceName, info->name, sizeof(info->name), kCFStringEncodingUTF8);
-        CFRelease(deviceName);
-    } else {
-        strncpy(info->name, "Unknown Device", sizeof(info->name) - 1);
+    OSStatus status = getAudioProperty(deviceId, kAudioDevicePropertyDeviceNameCFString,
+                                       kAudioObjectPropertyScopeGlobal, 0, &deviceName, &dataSize);
+    if (status != noErr) {
+        return status; // 返回获取设备名称时的错误状态
     }
+    CFStringGetCString(deviceName, info->name, sizeof(info->name), kCFStringEncodingUTF8);
+    CFRelease(deviceName);
 
     // 获取通道信息
     getChannelCounts(deviceId, &info->inputChannelCount, &info->outputChannelCount);
@@ -351,7 +351,44 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo *info) {
     // 检查设备运行状态
     checkDeviceRunningStatus(deviceId, info);
 
-    return noErr;
+    return noErr; // 确保在成功完成所有操作后返回 noErr
+}
+
+OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
+    // 首先获取设备信息
+    AudioDeviceInfo deviceInfo;
+    OSStatus status = getDeviceInfo(deviceId, &deviceInfo);
+    if (status != noErr) {
+        return status; // 如果获取设备信息失败，直接返回错误状态
+    }
+
+    // 确定正确的作用域
+    AudioObjectPropertyScope scope;
+    if (deviceInfo.deviceType == kDeviceTypeInput) {
+        scope = kAudioDevicePropertyScopeInput;
+    } else if (deviceInfo.deviceType == kDeviceTypeOutput) {
+        scope = kAudioDevicePropertyScopeOutput;
+    } else {
+        // 对于输入输出设备，我们需要确定用户想要控制哪个方向
+        // 这里可能需要添加额外的参数来指定
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    AudioObjectPropertyAddress propertyAddress = {
+            kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+            scope,
+            kAudioObjectPropertyElementMain
+    };
+
+    // 检查属性是否可设置
+    Boolean isSettable = false;
+    status = AudioObjectIsPropertySettable(deviceId, &propertyAddress, &isSettable);
+    if (status != noErr || !isSettable) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 设置音量
+    return AudioObjectSetPropertyData(deviceId, &propertyAddress, 0, NULL, sizeof(volume), &volume);
 }
 
 const char *getTransportTypeName(const UInt32 transportType) {
@@ -387,4 +424,17 @@ const char *getFormatFlagsDescription(const UInt32 formatFlags) {
     if (formatFlags & kAudioFormatFlagIsSignedInteger) return "Signed Integer";
     if (formatFlags & kAudioFormatFlagIsNonInterleaved) return "Non-interleaved";
     return "Unknown";
+}
+
+const char *getDeviceTypeString(AudioDeviceType type) {
+    switch (type) {
+        case kDeviceTypeInput:
+            return "输入";
+        case kDeviceTypeOutput:
+            return "输出";
+        case kDeviceTypeInputOutput:
+            return "输入/输出";
+        default:
+            return "未知";
+    }
 }
