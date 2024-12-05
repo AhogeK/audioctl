@@ -388,7 +388,57 @@ OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
     }
 
     // 设置音量
-    return AudioObjectSetPropertyData(deviceId, &propertyAddress, 0, NULL, sizeof(volume), &volume);
+    return AudioObjectSetPropertyData(deviceId, &propertyAddress, 0,
+                                      NULL, sizeof(volume), &volume);
+}
+
+OSStatus setDeviceActive(AudioDeviceID deviceId) {
+    AudioDeviceInfo deviceInfo;
+    OSStatus status = getDeviceInfo(deviceId, &deviceInfo);
+    if (status != noErr) {
+        return status;
+    }
+
+    // 根据设备类型选择正确的属性地址
+    AudioObjectPropertyAddress propertyAddress = {
+            kAudioHardwarePropertyDefaultOutputDevice,  // 使用系统输出设备属性
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+    };
+
+    if (deviceInfo.deviceType == kDeviceTypeInput) {
+        propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+    }
+
+    // 设置默认设备
+    status = AudioObjectSetPropertyData(kAudioObjectSystemObject,
+                                        &propertyAddress,
+                                        0,
+                                        NULL,
+                                        sizeof(AudioDeviceID),
+                                        &deviceId);
+
+    if (status != noErr) {
+        printf("错误：无法设置设备为默认设备，错误码: %d\n", status);
+        return status;
+    }
+
+    // 验证设置是否生效
+    AudioDeviceID currentDevice;
+    UInt32 propertySize = sizeof(AudioDeviceID);
+    status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                        &propertyAddress,
+                                        0,
+                                        NULL,
+                                        &propertySize,
+                                        &currentDevice);
+
+    if (status != noErr || currentDevice != deviceId) {
+        printf("错误：设备切换未生效\n");
+        return kAudioHardwareUnspecifiedError;
+    }
+
+    return noErr;
 }
 
 const char *getTransportTypeName(const UInt32 transportType) {
@@ -424,17 +474,4 @@ const char *getFormatFlagsDescription(const UInt32 formatFlags) {
     if (formatFlags & kAudioFormatFlagIsSignedInteger) return "Signed Integer";
     if (formatFlags & kAudioFormatFlagIsNonInterleaved) return "Non-interleaved";
     return "Unknown";
-}
-
-const char *getDeviceTypeString(AudioDeviceType type) {
-    switch (type) {
-        case kDeviceTypeInput:
-            return "输入";
-        case kDeviceTypeOutput:
-            return "输出";
-        case kDeviceTypeInputOutput:
-            return "输入/输出";
-        default:
-            return "未知";
-    }
 }
