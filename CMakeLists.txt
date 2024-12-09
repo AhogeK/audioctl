@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(audioctl C OBJC)
+enable_testing()
 
 # 基本设置
 set(CMAKE_C_STANDARD 11)
@@ -63,3 +64,5 @@ set_target_properties(audioctl PROPERTIES
 
 # 生成 compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+add_subdirectory(tests)

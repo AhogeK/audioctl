@@ -204,3 +204,5 @@ tags
 # Persistent undo
 [._]*.un~
 
+# personal
+devlog.md
