@@ -1,5 +1,9 @@
 # 添加测试可执行文件
-add_executable(test_virtual_audio_device test_virtual_audio_device.c)
+add_executable(test_virtual_audio_device
+        test_main.c
+        test_virtual_audio_device.c
+        test_virtual_device_control.c
+)
 
 # 链接需要测试的源文件
 target_sources(test_virtual_audio_device PRIVATE

@@ -56,12 +56,12 @@ OSStatus virtual_device_create(VirtualAudioDevice **outDevice);
 void virtual_device_destroy(VirtualAudioDevice *device);
 
 
-//// 设备控制
-//OSStatus virtual_device_start(VirtualAudioDevice *device);
-//
-//OSStatus virtual_device_stop(VirtualAudioDevice *device);
-//
-//
+// 设备控制
+OSStatus virtual_device_start(VirtualAudioDevice *device);
+
+OSStatus virtual_device_stop(VirtualAudioDevice *device);
+
+
 //// 音频控制
 //OSStatus virtual_device_set_mute(VirtualAudioDevice *device, Boolean mute);
 //

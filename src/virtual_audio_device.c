@@ -78,7 +78,7 @@ void virtual_device_destroy(VirtualAudioDevice *device) {
     if (device != NULL) {
         // 停止设备
         if (atomic_load(&device->deviceIsRunning)) {
-//            virtual_device_stop(device);
+            virtual_device_stop(device);
         }
 
         // 清理音频缓冲区
@@ -103,4 +103,93 @@ void virtual_device_destroy(VirtualAudioDevice *device) {
         // 释放设备结构题
         free(device);
     }
+}
+
+// 设备启动
+OSStatus virtual_device_start(VirtualAudioDevice *device) {
+    // 参数检查
+    if (device == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 获取状态锁
+    pthread_mutex_lock(&device->stateMutex);
+
+    // 检查当前状态
+    if (device->state == DEVICE_STATE_RUNNING) {
+        pthread_mutex_unlock(&device->stateMutex);
+        return kAudioHardwareNoError; // 设备已经在运行
+    }
+
+    // 检查设备是否处于可启动状态
+    if (device->state != DEVICE_STATE_STOPPED) {
+        pthread_mutex_unlock(&device->stateMutex);
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 初始化音频输出流
+    if (!device->outputStream.isActive) {
+        // 清空音频缓冲区
+        if (device->outputStream.bufferList != NULL &&
+            device->outputStream.bufferList->mBuffers[0].mData != NULL) {
+            memset(device->outputStream.bufferList->mBuffers[0].mData, 0,
+                   device->outputStream.bufferList->mBuffers[0].mDataByteSize);
+        }
+
+        device->outputStream.isActive = true;
+    }
+
+    // 更新设备状态
+    device->state = DEVICE_STATE_RUNNING;
+    atomic_store(&device->deviceIsRunning, true);
+
+    // 释放状态锁
+    pthread_mutex_unlock(&device->stateMutex);
+
+    return kAudioHardwareNoError;
+}
+
+// 设备停止
+OSStatus virtual_device_stop(VirtualAudioDevice *device) {
+    // 参数检查
+    if (device == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 获取状态锁
+    pthread_mutex_lock(&device->stateMutex);
+
+    // 检查当前状态
+    if (device->state == DEVICE_STATE_STOPPED) {
+        pthread_mutex_unlock(&device->stateMutex);
+        return kAudioHardwareNoError; // 设备已经停止
+    }
+
+    // 检查设备是否处于可停止状态
+    if (device->state != DEVICE_STATE_RUNNING) {
+        pthread_mutex_unlock(&device->stateMutex);
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 停止音频输出流
+    if (device->outputStream.isActive) {
+        // 停止数据流
+        device->outputStream.isActive = false;
+
+        // 清空音频缓冲区
+        if (device->outputStream.bufferList != NULL &&
+            device->outputStream.bufferList->mBuffers[0].mData != NULL) {
+            memset(device->outputStream.bufferList->mBuffers[0].mData, 0,
+                   device->outputStream.bufferList->mBuffers[0].mDataByteSize);
+        }
+    }
+
+    // 更新设备状态
+    device->state = DEVICE_STATE_STOPPED;
+    atomic_store(&device->deviceIsRunning, false);
+
+    // 释放状态锁
+    pthread_mutex_unlock(&device->stateMutex);
+
+    return kAudioHardwareNoError;
 }
