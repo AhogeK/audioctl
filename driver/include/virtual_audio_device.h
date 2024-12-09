@@ -51,14 +51,14 @@ public:
 
 private:
     // 音频格式相关
-    IOUserAudioStreamBasicDescription backup_format;
-    IOUserAudioStreamBasicDescription current_format;
+    IOUserAudioStreamBasicDescription backup_format_;
+    IOUserAudioStreamBasicDescription current_format_;
 
     // 设备状态和锁
-    IOLock *config_lock{nullptr};
-    IOUserAudioDriver *audioDriver{nullptr};
-    IOUserAudioStream *output_stream{nullptr};
-    bool is_running{false};
+    IOLock *config_lock_{nullptr};
+    IOUserAudioDriver *audio_driver_{nullptr};
+    IOUserAudioStream *output_stream_{nullptr};
+    bool is_running_{false};
 
     // 配置变更类型
     enum ConfigurationChangeType {
@@ -73,32 +73,32 @@ private:
     kern_return_t configure_streams();
 
     // 配置管理方法
-    kern_return_t handleConfigurationError(kern_return_t result, bool was_running);
+    kern_return_t handle_configuration_error(kern_return_t result, bool was_running);
 
-    kern_return_t handleConfigurationChange(uint64_t in_change_action,
-                                            const OSObject *in_change_info);
+    kern_return_t handle_configuration_change(uint64_t in_change_action,
+                                              const OSObject *in_change_info);
 
-    kern_return_t changeSampleRate(const OSObject *in_change_info);
+    kern_return_t change_sample_rate(const OSObject *in_change_info);
 
-    kern_return_t changeFormat(const OSObject *in_change_info);
+    kern_return_t change_format(const OSObject *in_change_info);
 
-    kern_return_t changeChannels(const OSObject *in_change_info);
+    kern_return_t change_channels(const OSObject *in_change_info);
 
     // 流管理方法
-    kern_return_t configureNewStream(IOUserAudioStream *stream) const;
+    kern_return_t configure_new_stream(IOUserAudioStream *stream) const;
 
-    kern_return_t restoreOldStream(IOUserAudioStream *old_stream,
-                                   bool was_active,
-                                   const IOUserAudioStreamBasicDescription &old_format);
+    kern_return_t restore_old_stream(IOUserAudioStream *old_stream,
+                                     bool was_active,
+                                     const IOUserAudioStreamBasicDescription &old_format);
 
     // 初始化和配置方法
-    bool initializeAudioFormat();
+    bool initialize_audio_format();
 
-    bool configureDeviceProperties();
+    bool configure_device_properties();
 
-    bool isInitialized() const { return config_lock != nullptr && audioDriver != nullptr; }
+    bool is_initialized() const { return config_lock_ != nullptr && audio_driver_ != nullptr; }
 
-    static bool validateAudioFormat(const IOUserAudioStreamBasicDescription &format);
+    static bool validate_audio_format(const IOUserAudioStreamBasicDescription &format);
 };
 
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DEVICE_H
