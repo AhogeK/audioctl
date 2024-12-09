@@ -29,7 +29,7 @@ static int test_device_creation() {
         return 1;
     }
 
-    if (atomic_load(&device->volumeControlValue) != 100) {
+    if (atomic_load(&device->volumeControlValue) != 100.0f) {
         printf("FAIL: Initial volume is incorrect\n");
         virtual_device_destroy(device);
         return 1;

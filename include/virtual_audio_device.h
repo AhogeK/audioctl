@@ -39,7 +39,7 @@ typedef struct {
     pthread_mutex_t stateMutex;                    // 状态互斥锁
 
     // 音频控制
-    atomic_int volumeControlValue;                 // 音量控制值（0-100）
+    _Atomic Float32 volumeControlValue;            // 音量控制值（0.0-100.0）
     atomic_bool muteState;                         // 静音状态
 
     // 输出流
@@ -62,16 +62,16 @@ OSStatus virtual_device_start(VirtualAudioDevice *device);
 OSStatus virtual_device_stop(VirtualAudioDevice *device);
 
 
-//// 音频控制
-//OSStatus virtual_device_set_mute(VirtualAudioDevice *device, Boolean mute);
-//
-//OSStatus virtual_device_get_mute(const VirtualAudioDevice *device, Boolean *outMute);
-//
-//OSStatus virtual_device_set_volume(VirtualAudioDevice *device, Float32 volume);
-//
-//OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *outVolume);
-//
-//
+// 音频控制
+OSStatus virtual_device_set_mute(VirtualAudioDevice *device, Boolean mute);
+
+OSStatus virtual_device_get_mute(const VirtualAudioDevice *device, Boolean *outMute);
+
+OSStatus virtual_device_set_volume(VirtualAudioDevice *device, Float32 volume);
+
+OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *outVolume);
+
+
 //// 输出处理
 //OSStatus virtual_device_process_output(VirtualAudioDevice *device,
 //                                       AudioBufferList *outputData,

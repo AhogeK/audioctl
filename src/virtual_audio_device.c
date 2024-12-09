@@ -39,8 +39,8 @@ OSStatus virtual_device_create(VirtualAudioDevice **outDevice) {
     atomic_store(&device->deviceIsRunning, false);
     pthread_mutex_init(&device->stateMutex, NULL);
 
-    // 初始化音频控制
-    atomic_store(&device->volumeControlValue, 100);
+    // 初始化音量为 100.0（最大值）
+    atomic_store(&device->volumeControlValue, 100.0f);
     atomic_store(&device->muteState, false);
 
     // 初始化输出流
@@ -190,6 +190,71 @@ OSStatus virtual_device_stop(VirtualAudioDevice *device) {
 
     // 释放状态锁
     pthread_mutex_unlock(&device->stateMutex);
+
+    return kAudioHardwareNoError;
+}
+
+// 设置静音状态
+OSStatus virtual_device_set_mute(VirtualAudioDevice *device, Boolean mute) {
+    if (device == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 获取状态锁
+    pthread_mutex_lock(&device->stateMutex);
+
+    // 设置静音状态
+    atomic_store(&device->muteState, mute);
+
+    // 释放状态锁
+    pthread_mutex_unlock(&device->stateMutex);
+
+    return kAudioHardwareNoError;
+}
+
+// 获取静音状态
+OSStatus virtual_device_get_mute(const VirtualAudioDevice *device, Boolean *outMute) {
+    if (device == NULL || outMute == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 获取静音状态
+    *outMute = atomic_load(&device->muteState);
+
+    return kAudioHardwareNoError;
+}
+
+// 设置音量
+OSStatus virtual_device_set_volume(VirtualAudioDevice *device, Float32 volume) {
+    if (device == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 检查音量范围 (0.0-100.0)
+    if (volume < 0.0f || volume > 100.0f) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 获取状态锁
+    pthread_mutex_lock(&device->stateMutex);
+
+    // 直接存储浮点数值
+    atomic_store(&device->volumeControlValue, volume);
+
+    // 释放状态锁
+    pthread_mutex_unlock(&device->stateMutex);
+
+    return kAudioHardwareNoError;
+}
+
+// 获取音量
+OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *outVolume) {
+    if (device == NULL || outVolume == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 直接获取浮点数值
+    *outVolume = atomic_load(&device->volumeControlValue);
 
     return kAudioHardwareNoError;
 }
