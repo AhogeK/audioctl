@@ -72,12 +72,12 @@ OSStatus virtual_device_set_volume(VirtualAudioDevice *device, Float32 volume);
 OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *outVolume);
 
 
-//// 输出处理
-//OSStatus virtual_device_process_output(VirtualAudioDevice *device,
-//                                       AudioBufferList *outputData,
-//                                       UInt32 frameCount);
-//
-//
+// 输出处理
+OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
+                                       AudioBufferList *outputData,
+                                       UInt32 frameCount);
+
+
 //// 状态查询
 //OSStatus virtual_device_get_state(const VirtualAudioDevice *device, DeviceState *outState);
 //

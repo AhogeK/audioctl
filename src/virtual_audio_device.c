@@ -258,3 +258,56 @@ OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *ou
 
     return kAudioHardwareNoError;
 }
+
+
+void apply_volume_and_clamp(Float32 *samples, UInt32 sampleCount, Float32 volumeScale) {
+    for (UInt32 i = 0; i < sampleCount; i++) {
+        samples[i] *= volumeScale;
+
+        // 防止音频信号过载
+        if (samples[i] > 1.0f) {
+            samples[i] = 1.0f;
+        } else if (samples[i] < -1.0f) {
+            samples[i] = -1.0f;
+        }
+    }
+}
+
+// 输出处理
+OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
+                                       AudioBufferList *outputData,
+                                       UInt32 frameCount) {
+    if (device == NULL || outputData == NULL || frameCount == 0) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    if (device->state != DEVICE_STATE_RUNNING) {
+        return kAudioHardwareNotRunningError;
+    }
+
+    // 获取当前音量和静音状态
+    Float32 currentVolume = atomic_load(&device->volumeControlValue);
+    Boolean isMuted = atomic_load(&device->muteState);
+
+    // 音量系数 (0.0 - 1.0)
+    Float32 volumeScale = isMuted ? 0.0f : (currentVolume / 100.0f);
+
+    // 处理每个缓冲区
+    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; bufferIndex++) {
+        AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+        Float32 *samples = (Float32 *) buffer->mData;
+        UInt32 sampleCount = frameCount * buffer->mNumberChannels;
+
+        // 如果完全静音或音量为0，直接清零
+        if (isMuted || currentVolume <= 0.0f) {
+            memset(samples, 0, sampleCount * sizeof(Float32));
+        } else {
+            apply_volume_and_clamp(samples, sampleCount, volumeScale);
+        }
+
+        // 更新已处理的字节数
+        buffer->mDataByteSize = sampleCount * sizeof(Float32);
+    }
+
+    return kAudioHardwareNoError;
+}
