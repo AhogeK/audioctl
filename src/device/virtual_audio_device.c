@@ -2,7 +2,7 @@
 // Created by AhogeK on 12/9/24.
 //
 
-#include "virtual_audio_device.h"
+#include "device/virtual_audio_device.h"
 #include <pthread.h>
 
 // 默认音频格式配置
@@ -31,8 +31,8 @@ OSStatus virtual_device_create(VirtualAudioDevice **outDevice) {
 
     // 初始化基本属性
     device->deviceID = arc4random();
-    device->deviceUID = CFStringCreateWithCString(NULL, "com.ahogek.virtual.device", kCFStringEncodingUTF8);
-    device->deviceName = CFStringCreateWithCString(NULL, "Virtual Audio Device", kCFStringEncodingUTF8);
+    device->deviceUID = CFStringCreateWithCString(NULL, "com.ahogek.virtualaudiodriver", kCFStringEncodingUTF8);
+    device->deviceName = CFStringCreateWithCString(NULL, "Virtual Audio Driver", kCFStringEncodingUTF8);
 
     // 初始化状态
     device->state = DEVICE_STATE_STOPPED;

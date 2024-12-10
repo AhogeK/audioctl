@@ -2,7 +2,7 @@
 // Created by AhogeK on 12/10/24.
 //
 
-#include "virtual_audio_device.h"
+#include "device/virtual_audio_device.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>

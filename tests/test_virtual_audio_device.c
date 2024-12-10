@@ -2,7 +2,7 @@
 // Created by AhogeK on 12/9/24.
 //
 
-#include "virtual_audio_device.h"
+#include "device/virtual_audio_device.h"
 #include <stdio.h>
 
 static int test_device_creation() {
