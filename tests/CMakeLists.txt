@@ -5,6 +5,7 @@ add_executable(test_virtual_audio_device
         test_virtual_device_control.c
         test_audio_control.c
         test_audio_processing.c
+        test_device_state.c
 )
 
 # 链接需要测试的源文件

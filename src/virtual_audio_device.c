@@ -311,3 +311,28 @@ OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
 
     return kAudioHardwareNoError;
 }
+
+// 获取设备状态
+OSStatus virtual_device_get_state(VirtualAudioDevice *device, DeviceState *outState) {
+    if (device == NULL || outState == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 使用互斥锁保护状态访问
+    pthread_mutex_lock(&device->stateMutex);
+    *outState = device->state;
+    pthread_mutex_unlock(&device->stateMutex);
+
+    return kAudioHardwareNoError;
+}
+
+// 获取设备运行状态
+OSStatus virtual_device_is_running(const VirtualAudioDevice *device, Boolean *outIsRunning) {
+    if (device == NULL || outIsRunning == NULL) {
+        return kAudioHardwareIllegalOperationError;
+    }
+
+    // 使用原子操作获取运行状态
+    *outIsRunning = atomic_load(&device->deviceIsRunning);
+    return kAudioHardwareNoError;
+}

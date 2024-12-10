@@ -78,9 +78,9 @@ OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
                                        UInt32 frameCount);
 
 
-//// 状态查询
-//OSStatus virtual_device_get_state(const VirtualAudioDevice *device, DeviceState *outState);
-//
-//OSStatus virtual_device_is_running(const VirtualAudioDevice *device, Boolean *outIsRunning);
+// 状态查询
+OSStatus virtual_device_get_state(VirtualAudioDevice *device, DeviceState *outState);
+
+OSStatus virtual_device_is_running(const VirtualAudioDevice *device, Boolean *outIsRunning);
 
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DEVICE_H

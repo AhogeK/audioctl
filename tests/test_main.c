@@ -12,6 +12,8 @@ extern int run_audio_control_tests(void);
 
 extern int run_audio_processing_tests(void);
 
+extern int run_device_state_tests(void);
+
 int main() {
     printf("Starting virtual audio device tests...\n");
     int failed = 0;
@@ -20,6 +22,7 @@ int main() {
     failed += run_device_control_tests();
     failed += run_audio_control_tests();
     failed += run_audio_processing_tests();
+    failed += run_device_state_tests();
 
     printf("\nTest summary: ");
     if (failed == 0) {
