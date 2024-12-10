@@ -110,3 +110,26 @@ static HRESULT VirtualAudioDriver_QueryInterface(void *inDriver, REFIID inUUID, 
     Done:
     return theAnswer;
 }
+
+static ULONG VirtualAudioDriver_AddRef(void *inDriver) {
+    // 该函数在递增后返回引用计数结果。
+
+    // 声明局部变量
+    ULONG theAnswer = 0;
+
+    // 检查参数
+    if (inDriver != gAudioServerPlugInDriverRef) {
+        goto Done; // 如果驱动引用不匹配，直接结束
+    }
+
+    // 增加引用计数
+    pthread_mutex_lock(&gPlugIn_StateMutex);
+    if (gPlugIn_RefCount < UINT32_MAX) {
+        ++gPlugIn_RefCount;
+    }
+    theAnswer = gPlugIn_RefCount;
+    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+    Done:
+    return theAnswer;
+}
