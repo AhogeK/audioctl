@@ -133,3 +133,28 @@ static ULONG VirtualAudioDriver_AddRef(void *inDriver) {
     Done:
     return theAnswer;
 }
+
+static ULONG VirtualAudioDriver_Release(void *inDriver) {
+    // 该函数在递减后返回引用计数结果。
+
+    // 声明局部变量
+    ULONG theAnswer = 0;
+
+    // 检查参数
+    if (inDriver != gAudioServerPlugInDriverRef) {
+        goto Done; // 如果驱动引用不匹配，直接结束
+    }
+
+    // 减少引用计数
+    pthread_mutex_lock(&gPlugIn_StateMutex);
+    if (gPlugIn_RefCount > 0) {
+        --gPlugIn_RefCount;
+        // 注意即使引用计数归零，也不需要做特别处理，因为 HAL 永远不会完全释放一个打开的插件。
+        // 我们仍然管理引用计数以确保 API 语义正确。
+    }
+    theAnswer = gPlugIn_RefCount;
+    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+    Done:
+    return theAnswer;
+}
