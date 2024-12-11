@@ -4434,3 +4434,43 @@ static OSStatus VirtualAudioDriver_BeginIOOperation(AudioServerPlugInDriverRef i
     Done:
     return theAnswer;
 }
+
+static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef inDriver,
+                                                 AudioObjectID inDeviceObjectID,
+                                                 AudioObjectID inStreamObjectID,
+                                                 UInt32 inClientID,
+                                                 UInt32 inOperationID,
+                                                 UInt32 inIOBufferFrameSize,
+                                                 const AudioServerPlugInIOCycleInfo *inIOCycleInfo,
+                                                 void *ioMainBuffer,
+                                                 void *ioSecondaryBuffer) {
+    // 这是调用以实际执行给定操作的函数。对于此设备，我们只需为 ReadInput 操作清空缓冲区。
+
+#pragma unused(inClientID, inIOCycleInfo, ioSecondaryBuffer)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_DoIOOperation: 错误的驱动引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_DoIOOperation: 错误的设备 ID");
+    FailWithAction((inStreamObjectID != kObjectID_Stream_Input) && (inStreamObjectID != kObjectID_Stream_Output),
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_DoIOOperation: 错误的流 ID");
+
+    // 如果这是 kAudioServerPlugInIOOperationReadInput，则清空缓冲区
+    if (inOperationID == kAudioServerPlugInIOOperationReadInput) {
+        // 我们总是处理一个2通道32位浮点缓冲区
+        memset(ioMainBuffer, 0, inIOBufferFrameSize * 8);
+    }
+
+    Done:
+    return theAnswer;
+}
