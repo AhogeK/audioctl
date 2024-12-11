@@ -8,6 +8,46 @@
 #include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CFPlugInCOM.h>
 
+//==================================================================================================
+#pragma mark -
+#pragma mark Macros
+//==================================================================================================
+#if TARGET_RT_BIG_ENDIAN
+#define FourCCToCString(the4CC) { ((char*)&the4CC)[0], ((char*)&the4CC)[1], ((char*)&the4CC)[2], ((char*)&the4CC)[3], 0 }
+#else
+#define FourCCToCString(the4CC) { ((char*)&the4CC)[3], ((char*)&the4CC)[2], ((char*)&the4CC)[1], ((char*)&the4CC)[0], 0 }
+#endif
+
+#if DEBUG
+#define DebugMsg(inFormat, ...) printf(inFormat "\n", ## __VA_ARGS__)
+#define FailIf(inCondition, inHandler, inMessage) \
+    if(inCondition) \
+    { \
+        DebugMsg(inMessage); \
+        goto inHandler; \
+    }
+#define FailWithAction(inCondition, inAction, inHandler, inMessage) \
+    if(inCondition) \
+    { \
+        DebugMsg(inMessage); \
+        { inAction; } \
+        goto inHandler; \
+    }
+#else
+#define DebugMsg(inFormat, ...)
+#define FailIf(inCondition, inHandler, inMessage) \
+    if(inCondition) \
+    { \
+        goto inHandler; \
+    }
+#define FailWithAction(inCondition, inAction, inHandler, inMessage) \
+    if(inCondition) \
+    { \
+        { inAction; } \
+        goto inHandler; \
+    }
+#endif
+
 // 基本的驱动接口结构体声明
 extern AudioServerPlugInDriverInterface gAudioServerPlugInDriverInterface;
 extern AudioServerPlugInDriverInterface *gAudioServerPlugInDriverInterfacePtr;

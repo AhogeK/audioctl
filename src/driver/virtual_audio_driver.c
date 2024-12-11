@@ -7,6 +7,51 @@
 #include <pthread.h>
 #include "mach/mach_time.h"
 
+//==================================================================================================
+#pragma mark -
+#pragma mark NullAudio State
+//==================================================================================================
+// VirtualAudio 示例的目的是提供一个基础实现，展示驱动程序需要做的最小功能集。
+// 该示例驱动程序具有以下特性：
+// - 一个插件
+// - 自定义属性，选择器为 kPlugIn_CustomPropertyID = 'PCst'
+// - 一个音频盒
+// - 一个设备
+// - 支持 44100 和 48000 采样率
+// - 通过硬编码提供 1.0 的采样率标量
+// - 一个输入流
+// - 支持 2 通道 32 位浮点 LPCM 采样
+// - 始终输出零
+// - 一个输出流
+// - 支持 2 通道 32 位浮点 LPCM 采样
+// - 写入的数据被忽略
+// - 控制项
+//   - 主输入音量
+//   - 主输出音量
+//   - 主输入静音
+//   - 主输出静音
+//   - 主输入数据源
+//   - 主输出数据源
+//   - 主直通数据目标
+//   - 所有这些仅用于演示，实际并不操作数据
+
+// 声明此驱动程序实现的所有对象的内部对象 ID。
+// 注意：此驱动程序具有固定的对象集，永远不会增长或缩小。
+enum {
+    kObjectID_PlugIn = kAudioObjectPlugInObject,
+    kObjectID_Box = 2,
+    kObjectID_Device = 3,
+    kObjectID_Stream_Input = 4,
+    kObjectID_Volume_Input_Master = 5,
+    kObjectID_Mute_Input_Master = 6,
+    kObjectID_DataSource_Input_Master = 7,
+    kObjectID_Stream_Output = 8,
+    kObjectID_Volume_Output_Master = 9,
+    kObjectID_Mute_Output_Master = 10,
+    kObjectID_DataSource_Output_Master = 11,
+    kObjectID_DataDestination_PlayThru_Master = 12
+};
+
 // 定义插件状态相关的全局变量
 static pthread_mutex_t gPlugIn_StateMutex = PTHREAD_MUTEX_INITIALIZER;
 static UInt32 gPlugIn_RefCount = 0;
@@ -292,6 +337,25 @@ static OSStatus VirtualAudioDriver_DestroyDevice(AudioServerPlugInDriverRef inDr
         theAnswer = kAudioHardwareBadObjectError;
         goto Done;
     }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_AddDeviceClient(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID,
+                                                   const AudioServerPlugInClientInfo *inClientInfo) {
+    // 此方法用于通知驱动程序有新的客户端正在使用给定的设备
+    // 这允许设备根据客户端的不同而采取不同的行为
+    // 此驱动程序不需要跟踪使用设备的客户端，因此我们只需检查参数并成功返回
+
+#pragma unused(inClientInfo)
+
+    // 声明返回状态变量
+    OSStatus theAnswer = 0;
+
+    // 验证参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done, "VirtualAudioDriver_AddDeviceClient: 无效的驱动程序引用");
+    FailIf(inDeviceObjectID != kObjectID_Device, Done, "VirtualAudioDriver_AddDeviceClient: 无效的设备对象ID");
 
     Done:
     return theAnswer;
