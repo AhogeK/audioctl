@@ -201,4 +201,34 @@ VirtualAudioDriver_IsControlPropertySettable(AudioServerPlugInDriverRef inDriver
                                              pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
                                              Boolean *outIsSettable);
 
+static OSStatus
+VirtualAudioDriver_GetPlugInPropertyDataSize(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                             pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                             UInt32 inQualifierDataSize, const void *inQualifierData,
+                                             UInt32 *outDataSize);
+
+static OSStatus VirtualAudioDriver_GetBoxPropertyDataSize(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                          pid_t inClientProcessID,
+                                                          const AudioObjectPropertyAddress *inAddress,
+                                                          UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                          UInt32 *outDataSize);
+
+static OSStatus
+VirtualAudioDriver_GetDevicePropertyDataSize(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                             pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                             UInt32 inQualifierDataSize, const void *inQualifierData,
+                                             UInt32 *outDataSize);
+
+static OSStatus
+VirtualAudioDriver_GetStreamPropertyDataSize(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                             pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                             UInt32 inQualifierDataSize, const void *inQualifierData,
+                                             UInt32 *outDataSize);
+
+static OSStatus
+VirtualAudioDriver_GetControlPropertyDataSize(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                              pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                              UInt32 inQualifierDataSize, const void *inQualifierData,
+                                              UInt32 *outDataSize);
+
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DRIVER_H
