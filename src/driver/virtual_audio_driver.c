@@ -1558,7 +1558,7 @@ static OSStatus VirtualAudioDriver_GetBoxPropertyData(AudioServerPlugInDriverRef
             // 这是box型号的人类可读名称
             FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
                            "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
-            *((CFStringRef *) outData) = CFSTR("虚拟音频设备");
+            *((CFStringRef *) outData) = CFSTR("DeviceName");
             *outDataSize = sizeof(CFStringRef);
             break;
 
@@ -1566,7 +1566,7 @@ static OSStatus VirtualAudioDriver_GetBoxPropertyData(AudioServerPlugInDriverRef
             // 这是box制造商的人类可读名称
             FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
                            "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
-            *((CFStringRef *) outData) = CFSTR("虚拟音频制造商");
+            *((CFStringRef *) outData) = CFSTR("ManufacturerName");
             *outDataSize = sizeof(CFStringRef);
             break;
 
@@ -2174,7 +2174,7 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
                            theAnswer = kAudioHardwareBadPropertySizeError,
                            Done,
                            "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyName 返回值空间不足");
-            *((CFStringRef *) outData) = CFSTR("虚拟音频设备");
+            *((CFStringRef *) outData) = CFSTR("DeviceName");
             *outDataSize = sizeof(CFStringRef);
             break;
 
@@ -2184,7 +2184,7 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
                            theAnswer = kAudioHardwareBadPropertySizeError,
                            Done,
                            "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyManufacturer 返回值空间不足");
-            *((CFStringRef *) outData) = CFSTR("虚拟音频制造商");
+            *((CFStringRef *) outData) = CFSTR("ManufacturerName");
             *outDataSize = sizeof(CFStringRef);
             break;
 
@@ -2196,16 +2196,16 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
                            "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyElementName 返回值空间不足");
             switch (inAddress->mElement) {
                 case 0:
-                    *((CFStringRef *) outData) = CFSTR("主声道");
+                    *((CFStringRef *) outData) = CFSTR("MasterElementName");
                     break;
                 case 1:
-                    *((CFStringRef *) outData) = CFSTR("左声道");
+                    *((CFStringRef *) outData) = CFSTR("LeftElementName");
                     break;
                 case 2:
-                    *((CFStringRef *) outData) = CFSTR("右声道");
+                    *((CFStringRef *) outData) = CFSTR("RightElementName");
                     break;
                 default:
-                    *((CFStringRef *) outData) = CFSTR("未知声道");
+                    *((CFStringRef *) outData) = CFSTR("unknown");
                     break;
             }
             *outDataSize = sizeof(CFStringRef);
@@ -2928,8 +2928,8 @@ static OSStatus VirtualAudioDriver_GetStreamPropertyData(AudioServerPlugInDriver
                            theAnswer = kAudioHardwareBadPropertySizeError,
                            Done,
                            "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioObjectPropertyName 返回值空间不足");
-            *((CFStringRef *) outData) = (inObjectID == kObjectID_Stream_Input) ? CFSTR("输入流名称") : CFSTR(
-                    "输出流名称");
+            *((CFStringRef *) outData) = (inObjectID == kObjectID_Stream_Input) ? CFSTR("InputStreamName") : CFSTR(
+                    "OutputStreamName");
             *outDataSize = sizeof(CFStringRef);
             break;
 

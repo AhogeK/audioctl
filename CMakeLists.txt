@@ -18,7 +18,7 @@ if (DEBUG_MODE)
     add_compile_options(-g -O0)
     message(STATUS "Building in DEBUG mode")
 else ()
-    add_compile_definitions(-O2)
+    add_compile_options(-O2)
     message(STATUS "Building in RELEASE mode")
 endif ()
 
@@ -38,16 +38,47 @@ include_directories(
 set(PLUGIN_OUTPUT_DIR "${CMAKE_BINARY_DIR}/plugins")
 set(DRIVER_OUTPUT_NAME "VirtualAudioDriver")
 
+# 定义资源文件
+set(LOCALIZED_RESOURCES
+        "${CMAKE_SOURCE_DIR}/en.lproj/Localizable.strings"
+)
+
+# 检查图标文件
+set(ICON_FILE "${CMAKE_SOURCE_DIR}/resource/DeviceIcon.icns")
+if (EXISTS ${ICON_FILE})
+    set(RESOURCE_FILES ${ICON_FILE})
+endif ()
+
 # 添加虚拟音频驱动插件
 add_library(virtual_audio_driver MODULE
         "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
 )
 
+# 添加资源文件到目标
+target_sources(virtual_audio_driver PRIVATE
+        ${LOCALIZED_RESOURCES}
+        ${RESOURCE_FILES}
+)
+
+# 设置资源文件的安装位置
+set_source_files_properties(
+        ${LOCALIZED_RESOURCES}
+        PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources/en.lproj"
+)
+
+if (EXISTS ${ICON_FILE})
+    set_source_files_properties(
+            ${ICON_FILE}
+            PROPERTIES
+            MACOSX_PACKAGE_LOCATION "Resources"
+    )
+endif ()
+
 # 设置驱动插件属性
 set_target_properties(virtual_audio_driver PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION "driver"
-        MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resource/Info.plist"
         LIBRARY_OUTPUT_DIRECTORY "${PLUGIN_OUTPUT_DIR}"
         OUTPUT_NAME "${DRIVER_OUTPUT_NAME}"

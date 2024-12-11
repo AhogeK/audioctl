@@ -27,8 +27,14 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -j|--jobs)
-            PARALLEL_JOBS="$2"
-            shift 2
+            if [[ $2 =~ ^[0-9]+$ ]]; then
+                PARALLEL_JOBS="$2"
+                shift
+            else
+                echo "无效的并行任务数: $2"
+                exit 1
+            fi
+            shift
             ;;
         --with-audioctl)
             BUILD_AUDIOCTL=true
@@ -50,96 +56,101 @@ BUILD_DIR="${PROJECT_DIR}/cmake-build-${BUILD_TYPE}"
 CMAKE=$(which cmake)
 NINJA=$(which ninja)
 
-# 检查 cmake 和 ninja 是否可用
-if [ -z "$CMAKE" ]; then
-    echo "找不到 cmake，请确保已安装并在 PATH 中"
-    exit 1
-fi
-
-if [ -z "$NINJA" ]; then
-    echo "找不到 ninja，请确保已安装并在 PATH 中"
-    exit 1
-fi
-
-echo "使用构建类型: ${BUILD_TYPE}"
-echo "并行任务数: ${PARALLEL_JOBS}"
-echo "构建目录: ${BUILD_DIR}"
-
-# 如果存在旧的驱动，先卸载
-if [ -d "$DRIVER_PATH" ]; then
-    echo "发现已安装的驱动，正在卸载..."
-    if ! rm -rf "$DRIVER_PATH"; then
-        echo "卸载旧驱动失败"
+function check_tools() {
+    if [ -z "$CMAKE" ]; then
+        echo "找不到 cmake，请确保已安装并在 PATH 中"
         exit 1
     fi
-    echo "旧驱动已卸载"
-fi
 
-# 创建构建目录（如果不存在）
-if ! mkdir -p "${BUILD_DIR}"; then
-    echo "创建构建目录失败"
-    exit 1
-fi
-
-# 清理构建目录（确保完全重新构建）
-echo "清理构建目录..."
-if ! "$CMAKE" --build "${BUILD_DIR}" --target clean 2>/dev/null; then
-    echo "注意：清理构建目录失败，可能是首次构建"
-fi
-
-# 配置项目
-echo "配置项目..."
-if ! "$CMAKE" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DCMAKE_MAKE_PROGRAM="${NINJA}" \
-    -G Ninja \
-    -S "${PROJECT_DIR}" \
-    -B "${BUILD_DIR}"; then
-    echo "CMake 配置失败"
-    exit 1
-fi
-
-# 构建驱动
-echo "构建驱动..."
-if ! "$CMAKE" --build "${BUILD_DIR}" --target virtual_audio_driver -j "${PARALLEL_JOBS}"; then
-    echo "构建驱动失败"
-    exit 1
-fi
-
-# 安装驱动
-echo "安装驱动..."
-if ! "$CMAKE" --install "${BUILD_DIR}"; then
-    echo "安装驱动失败"
-    exit 1
-fi
-
-# 构建 audioctl（如果指定）
-if [ "$BUILD_AUDIOCTL" = true ]; then
-    echo "构建 audioctl..."
-    if ! "$CMAKE" --build "${BUILD_DIR}" --target audioctl -j "${PARALLEL_JOBS}"; then
-        echo "构建 audioctl 失败"
+    if [ -z "$NINJA" ]; then
+        echo "找不到 ninja，请确保已安装并在 PATH 中"
         exit 1
     fi
-fi
+}
 
-# 重启 CoreAudio 服务以应用更改
-echo "重启 CoreAudio 服务..."
-if ! launchctl kickstart -k system/com.apple.audio.coreaudiod; then
-    echo "重启 CoreAudio 服务失败"
-    exit 1
-fi
+function uninstall_old_driver() {
+    if [ -d "$DRIVER_PATH" ]; then
+        echo "发现已安装的驱动，正在卸载..."
+        if ! rm -rf "$DRIVER_PATH"; then
+            echo "卸载旧驱动失败"
+            exit 1
+        fi
+        echo "旧驱动已卸载"
+    fi
+}
 
-echo "验证驱动安装..."
-if [ ! -d "$DRIVER_PATH" ]; then
-    echo "驱动安装失败：找不到驱动文件"
-    exit 1
-fi
+function configure_and_build() {
+    echo "使用构建类型: ${BUILD_TYPE}"
+    echo "并行任务数: ${PARALLEL_JOBS}"
+    echo "构建目录: ${BUILD_DIR}"
 
-# 验证驱动权限
-if [ ! -r "$DRIVER_PATH" ] || [ ! -x "$DRIVER_PATH" ]; then
-    echo "驱动安装失败：权限不正确"
-    exit 1
-fi
+    if ! mkdir -p "${BUILD_DIR}"; then
+        echo "创建构建目录失败"
+        exit 1
+    fi
 
-echo "驱动安装验证完成"
+    echo "清理构建目录..."
+    if ! "$CMAKE" --build "${BUILD_DIR}" --target clean 2>/dev/null; then
+        echo "注意：清理构建目录失败，可能是首次构建"
+    fi
 
-echo "驱动和程序安装或更新完成"
+    echo "配置项目..."
+    if ! "$CMAKE" -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+        -DCMAKE_MAKE_PROGRAM="${NINJA}" \
+        -G Ninja \
+        -S "${PROJECT_DIR}" \
+        -B "${BUILD_DIR}"; then
+        echo "CMake 配置失败"
+        exit 1
+    fi
+
+    echo "构建驱动..."
+    if ! "$CMAKE" --build "${BUILD_DIR}" --target virtual_audio_driver -j "${PARALLEL_JOBS}"; then
+        echo "构建驱动失败"
+        exit 1
+    fi
+
+    echo "安装驱动..."
+    if ! "$CMAKE" --install "${BUILD_DIR}"; then
+        echo "安装驱动失败"
+        exit 1
+    fi
+
+    if [ "$BUILD_AUDIOCTL" = true ]; then
+        echo "构建 audioctl..."
+        if ! "$CMAKE" --build "${BUILD_DIR}" --target audioctl -j "${PARALLEL_JOBS}"; then
+            echo "构建 audioctl 失败"
+            exit 1
+        fi
+    fi
+}
+
+function restart_coreaudio() {
+    echo "重启 CoreAudio 服务..."
+    if ! launchctl kickstart -k system/com.apple.audio.coreaudiod; then
+        echo "重启 CoreAudio 服务失败"
+        exit 1
+    fi
+}
+
+function verify_installation() {
+    echo "验证驱动安装..."
+    if [ ! -d "$DRIVER_PATH" ]; then
+        echo "驱动安装失败：找不到驱动文件"
+        exit 1
+    fi
+
+    if [ ! -r "$DRIVER_PATH" ] || [ ! -x "$DRIVER_PATH" ]; then
+        echo "驱动安装失败：权限不正确"
+        exit 1
+    fi
+
+    echo "驱动安装验证完成"
+    echo "驱动和程序安装或更新完成"
+}
+
+check_tools
+uninstall_old_driver
+configure_and_build
+restart_coreaudio
+verify_installation

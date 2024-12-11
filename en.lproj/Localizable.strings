@@ -1,0 +1,9 @@
+/* Localized strings displayed by the device in English */
+
+DeviceName = "Virtual Audio Device";
+InputStreamName = "Virtual Audio Input Stream";
+OutputStreamName = "Virtual Audio Output Stream";
+ManufacturerName = "AhogeK Inc.";
+MasterElementName = "Master";
+LeftElementName = "Left";
+RightElementName = "Right";
