@@ -4251,3 +4251,44 @@ VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef inDriver, AudioObjectID in
     Done:
     return theAnswer;
 }
+
+static OSStatus
+VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID, UInt32 inClientID) {
+    // 此调用告诉设备客户端已停止 IO。一旦所有客户端停止，驱动程序就可以停止硬件。
+
+#pragma unused(inClientID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_StopIO: 错误的驱动引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_StopIO: 错误的设备 ID");
+
+    // 我们需要持有状态锁
+    pthread_mutex_lock(&gPlugIn_StateMutex);
+
+    // 确定我们需要做什么
+    if (gDevice_IOIsRunning == 0) {
+        // 下溢是一个错误
+        theAnswer = kAudioHardwareIllegalOperationError;
+    } else if (gDevice_IOIsRunning == 1) {
+        // 我们需要停止硬件，在这种情况下意味着没有要做的事情。
+        gDevice_IOIsRunning = 0;
+    } else {
+        // IO 仍在运行，只需减少计数器
+        --gDevice_IOIsRunning;
+    }
+
+    // 解锁状态锁
+    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+    Done:
+    return theAnswer;
+}
