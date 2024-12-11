@@ -2,7 +2,7 @@
 // Created by AhogeK on 12/10/24.
 //
 
-#include "device/virtual_audio_device.h"
+#include "driver/virtual_audio_device.h"
 #include <stdio.h>
 
 // 测试状态查询

@@ -2,7 +2,7 @@
 // Created by AhogeK on 12/10/24.
 //
 
-#include "device/virtual_audio_driver.h"
+#include "driver/virtual_audio_driver.h"
 #include <stdatomic.h>
 #include <pthread.h>
 #include "mach/mach_time.h"
@@ -250,6 +250,29 @@ static OSStatus VirtualAudioDriver_Initialize(AudioServerPlugInDriverRef inDrive
     Float64 theHostClockFrequency = (Float64) theTimeBaseInfo.denom / (Float64) theTimeBaseInfo.numer;
     theHostClockFrequency *= 1000000000.0;
     gDevice_HostTicksPerFrame = theHostClockFrequency / gDevice_SampleRate;
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_CreateDevice(AudioServerPlugInDriverRef inDriver, CFDictionaryRef inDescription,
+                                                const AudioServerPlugInClientInfo *inClientInfo,
+                                                AudioObjectID *outDeviceObjectID) {
+    // 此方法用于告诉实现传输管理器语义的驱动程序从一组 AudioEndpoints 创建 AudioEndpointDevice。
+    // 由于此驱动程序不是传输管理器，我们只需检查参数并返回 kAudioHardwareUnsupportedOperationError。
+
+#pragma unused(inDescription)
+#pragma unused(inClientInfo)
+#pragma unused(outDeviceObjectID)
+
+    // 声明局部变量
+    OSStatus theAnswer = kAudioHardwareUnsupportedOperationError;
+
+    // 检查参数
+    if (inDriver != gAudioServerPlugInDriverRef) {
+        theAnswer = kAudioHardwareBadObjectError;
+        goto Done;
+    }
 
     Done:
     return theAnswer;

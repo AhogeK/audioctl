@@ -40,7 +40,7 @@ set(DRIVER_OUTPUT_NAME "VirtualAudioDriver")
 
 # 添加虚拟音频驱动插件
 add_library(virtual_audio_driver MODULE
-        "${CMAKE_SOURCE_DIR}/src/device/virtual_audio_driver.c"
+        "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
 )
 
 # 设置驱动插件属性
@@ -71,7 +71,7 @@ file(GLOB_RECURSE HEADER_FILES
 
 # 从主程序源文件中排除设备相关源文件
 list(REMOVE_ITEM SOURCE_FILES
-        "${CMAKE_SOURCE_DIR}/src/device/virtual_audio_driver.c"
+        "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
 )
 
 # 添加主可执行文件

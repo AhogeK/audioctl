@@ -10,7 +10,7 @@ add_executable(test_virtual_audio_device
 
 # 链接需要测试的源文件
 target_sources(test_virtual_audio_device PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/device/virtual_audio_device.c
+        ${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_device.c
 )
 
 # 添加包含目录
