@@ -503,6 +503,68 @@ VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef inDriver, AudioObjectI
     return theAnswer;
 }
 
+static OSStatus VirtualAudioDriver_IsPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                      pid_t inClientProcessID,
+                                                      const AudioObjectPropertyAddress *inAddress,
+                                                      Boolean *outIsSettable) {
+    // 此方法返回对象上的给定属性是否可以更改其值
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsPropertySettable: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsPropertySettable: 地址为空");
+    FailWithAction(outIsSettable == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsPropertySettable: 没有地方存放返回值");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inObjectID) {
+        case kObjectID_PlugIn:
+            theAnswer = VirtualAudioDriver_IsPlugInPropertySettable(inDriver, inObjectID, inClientProcessID, inAddress,
+                                                                    outIsSettable);
+            break;
+
+        case kObjectID_Box:
+            theAnswer = VirtualAudioDriver_IsBoxPropertySettable(inDriver, inObjectID, inClientProcessID, inAddress,
+                                                                 outIsSettable);
+            break;
+
+        case kObjectID_Device:
+            theAnswer = VirtualAudioDriver_IsDevicePropertySettable(inDriver, inObjectID, inClientProcessID, inAddress,
+                                                                    outIsSettable);
+            break;
+
+        case kObjectID_Stream_Input:
+        case kObjectID_Stream_Output:
+            theAnswer = VirtualAudioDriver_IsStreamPropertySettable(inDriver, inObjectID, inClientProcessID, inAddress,
+                                                                    outIsSettable);
+            break;
+
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            theAnswer = VirtualAudioDriver_IsControlPropertySettable(inDriver, inObjectID, inClientProcessID, inAddress,
+                                                                     outIsSettable);
+            break;
+
+        default:
+            theAnswer = kAudioHardwareBadObjectError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
 #pragma mark PlugIn Property Operations
 
 static Boolean VirtualAudioDriver_HasPlugInProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
@@ -540,6 +602,61 @@ static Boolean VirtualAudioDriver_HasPlugInProperty(AudioServerPlugInDriverRef i
         case kAudioObjectPropertyCustomPropertyInfoList:    // 自定义属性信息列表
         case kPlugIn_CustomPropertyID:             // 自定义属性ID
             theAnswer = true;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus
+VirtualAudioDriver_IsPlugInPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                            pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                            Boolean *outIsSettable) {
+    // 此方法返回插件对象上的给定属性是否可以更改其值
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsPlugInPropertySettable: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsPlugInPropertySettable: 地址为空");
+    FailWithAction(outIsSettable == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsPlugInPropertySettable: 没有地方存放返回值");
+    FailWithAction(inObjectID != kObjectID_PlugIn, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsPlugInPropertySettable: 不是插件对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetPlugInPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 只读属性
+        case kAudioObjectPropertyBaseClass:
+        case kAudioObjectPropertyClass:
+        case kAudioObjectPropertyOwner:
+        case kAudioObjectPropertyManufacturer:
+        case kAudioObjectPropertyOwnedObjects:
+        case kAudioPlugInPropertyBoxList:
+        case kAudioPlugInPropertyTranslateUIDToBox:
+        case kAudioPlugInPropertyDeviceList:
+        case kAudioPlugInPropertyTranslateUIDToDevice:
+        case kAudioPlugInPropertyResourceBundle:
+        case kAudioObjectPropertyCustomPropertyInfoList:
+            *outIsSettable = false;
+            break;
+
+            // 可写属性
+        case kPlugIn_CustomPropertyID:
+            *outIsSettable = true;
+            break;
+
+            // 未知属性
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
             break;
     }
 
@@ -593,6 +710,68 @@ static Boolean VirtualAudioDriver_HasBoxProperty(AudioServerPlugInDriverRef inDr
         case kAudioBoxPropertyAcquisitionFailed:   // 获取是否失败
         case kAudioBoxPropertyDeviceList:          // 设备列表
             theAnswer = true;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_IsBoxPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         Boolean *outIsSettable) {
+    // 此方法返回音频盒对象上的给定属性是否可以更改其值
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsBoxPropertySettable: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsBoxPropertySettable: 地址为空");
+    FailWithAction(outIsSettable == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsBoxPropertySettable: 没有地方存放返回值");
+    FailWithAction(inObjectID != kObjectID_Box, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsBoxPropertySettable: 不是音频盒对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetBoxPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 只读属性
+        case kAudioObjectPropertyBaseClass:
+        case kAudioObjectPropertyClass:
+        case kAudioObjectPropertyOwner:
+        case kAudioObjectPropertyModelName:
+        case kAudioObjectPropertyManufacturer:
+        case kAudioObjectPropertyOwnedObjects:
+        case kAudioObjectPropertySerialNumber:
+        case kAudioObjectPropertyFirmwareVersion:
+        case kAudioBoxPropertyBoxUID:
+        case kAudioBoxPropertyTransportType:
+        case kAudioBoxPropertyHasAudio:
+        case kAudioBoxPropertyHasVideo:
+        case kAudioBoxPropertyHasMIDI:
+        case kAudioBoxPropertyIsProtected:
+        case kAudioBoxPropertyAcquisitionFailed:
+        case kAudioBoxPropertyDeviceList:
+            *outIsSettable = false;
+            break;
+
+            // 可写属性
+        case kAudioObjectPropertyName:
+        case kAudioObjectPropertyIdentify:
+        case kAudioBoxPropertyAcquired:
+            *outIsSettable = true;
+            break;
+
+            // 未知属性
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
             break;
     }
 
@@ -669,6 +848,76 @@ static Boolean VirtualAudioDriver_HasDeviceProperty(AudioServerPlugInDriverRef i
     return theAnswer;
 }
 
+static OSStatus
+VirtualAudioDriver_IsDevicePropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                            pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                            Boolean *outIsSettable) {
+    // 此方法返回设备对象上的给定属性是否可以更改其值
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsDevicePropertySettable: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsDevicePropertySettable: 地址为空");
+    FailWithAction(outIsSettable == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsDevicePropertySettable: 没有地方存放返回值");
+    FailWithAction(inObjectID != kObjectID_Device, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsDevicePropertySettable: 不是设备对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetDevicePropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 只读属性
+        case kAudioObjectPropertyBaseClass:
+        case kAudioObjectPropertyClass:
+        case kAudioObjectPropertyOwner:
+        case kAudioObjectPropertyName:
+        case kAudioObjectPropertyManufacturer:
+        case kAudioObjectPropertyElementName:
+        case kAudioObjectPropertyOwnedObjects:
+        case kAudioDevicePropertyDeviceUID:
+        case kAudioDevicePropertyModelUID:
+        case kAudioDevicePropertyTransportType:
+        case kAudioDevicePropertyRelatedDevices:
+        case kAudioDevicePropertyClockDomain:
+        case kAudioDevicePropertyDeviceIsAlive:
+        case kAudioDevicePropertyDeviceIsRunning:
+        case kAudioDevicePropertyDeviceCanBeDefaultDevice:
+        case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
+        case kAudioDevicePropertyLatency:
+        case kAudioDevicePropertyStreams:
+        case kAudioObjectPropertyControlList:
+        case kAudioDevicePropertySafetyOffset:
+        case kAudioDevicePropertyAvailableNominalSampleRates:
+        case kAudioDevicePropertyIsHidden:
+        case kAudioDevicePropertyPreferredChannelsForStereo:
+        case kAudioDevicePropertyPreferredChannelLayout:
+        case kAudioDevicePropertyZeroTimeStampPeriod:
+        case kAudioDevicePropertyIcon:
+            *outIsSettable = false;
+            break;
+
+            // 可写属性
+        case kAudioDevicePropertyNominalSampleRate:
+            *outIsSettable = true;
+            break;
+
+            // 未知属性
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
 #pragma mark Stream Property Operations
 
 static Boolean VirtualAudioDriver_HasStreamProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
@@ -711,6 +960,64 @@ static Boolean VirtualAudioDriver_HasStreamProperty(AudioServerPlugInDriverRef i
         case kAudioStreamPropertyAvailableVirtualFormats:
         case kAudioStreamPropertyAvailablePhysicalFormats:
             theAnswer = true;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus
+VirtualAudioDriver_IsStreamPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                            pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                            Boolean *outIsSettable) {
+    // 此方法返回流对象上的给定属性是否可以更改其值
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsStreamPropertySettable: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsStreamPropertySettable: 地址为空");
+    FailWithAction(outIsSettable == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsStreamPropertySettable: 没有地方存放返回值");
+    FailWithAction((inObjectID != kObjectID_Stream_Input) && (inObjectID != kObjectID_Stream_Output),
+                   theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsStreamPropertySettable: 不是流对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetStreamPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 只读属性
+        case kAudioObjectPropertyBaseClass:
+        case kAudioObjectPropertyClass:
+        case kAudioObjectPropertyOwner:
+        case kAudioObjectPropertyOwnedObjects:
+        case kAudioObjectPropertyName:
+        case kAudioStreamPropertyDirection:
+        case kAudioStreamPropertyTerminalType:
+        case kAudioStreamPropertyStartingChannel:
+        case kAudioStreamPropertyLatency:
+        case kAudioStreamPropertyAvailableVirtualFormats:
+        case kAudioStreamPropertyAvailablePhysicalFormats:
+            *outIsSettable = false;
+            break;
+
+            // 可写属性
+        case kAudioStreamPropertyIsActive:
+        case kAudioStreamPropertyVirtualFormat:
+        case kAudioStreamPropertyPhysicalFormat:
+            *outIsSettable = true;
+            break;
+
+            // 未知属性
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
             break;
     }
 
@@ -799,6 +1106,124 @@ static Boolean VirtualAudioDriver_HasControlProperty(AudioServerPlugInDriverRef 
                     theAnswer = true;
                     break;
             }
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus
+VirtualAudioDriver_IsControlPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                             pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                             Boolean *outIsSettable) {
+    // 此方法返回控制对象上的给定属性是否可以更改其值
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_IsControlPropertySettable: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsControlPropertySettable: 地址为空");
+    FailWithAction(outIsSettable == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_IsControlPropertySettable: 没有地方存放返回值");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetControlPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inObjectID) {
+        // 音量控制
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+            switch (inAddress->mSelector) {
+                // 只读属性
+                case kAudioObjectPropertyBaseClass:
+                case kAudioObjectPropertyClass:
+                case kAudioObjectPropertyOwner:
+                case kAudioObjectPropertyOwnedObjects:
+                case kAudioControlPropertyScope:
+                case kAudioControlPropertyElement:
+                case kAudioLevelControlPropertyDecibelRange:
+                case kAudioLevelControlPropertyConvertScalarToDecibels:
+                case kAudioLevelControlPropertyConvertDecibelsToScalar:
+                    *outIsSettable = false;
+                    break;
+
+                    // 可写属性
+                case kAudioLevelControlPropertyScalarValue:
+                case kAudioLevelControlPropertyDecibelValue:
+                    *outIsSettable = true;
+                    break;
+
+                    // 未知属性
+                default:
+                    theAnswer = kAudioHardwareUnknownPropertyError;
+                    break;
+            }
+            break;
+
+            // 静音控制
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+            switch (inAddress->mSelector) {
+                // 只读属性
+                case kAudioObjectPropertyBaseClass:
+                case kAudioObjectPropertyClass:
+                case kAudioObjectPropertyOwner:
+                case kAudioObjectPropertyOwnedObjects:
+                case kAudioControlPropertyScope:
+                case kAudioControlPropertyElement:
+                    *outIsSettable = false;
+                    break;
+
+                    // 可写属性
+                case kAudioBooleanControlPropertyValue:
+                    *outIsSettable = true;
+                    break;
+
+                    // 未知属性
+                default:
+                    theAnswer = kAudioHardwareUnknownPropertyError;
+                    break;
+            }
+            break;
+
+            // 数据源/目标控制
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            switch (inAddress->mSelector) {
+                // 只读属性
+                case kAudioObjectPropertyBaseClass:
+                case kAudioObjectPropertyClass:
+                case kAudioObjectPropertyOwner:
+                case kAudioObjectPropertyOwnedObjects:
+                case kAudioControlPropertyScope:
+                case kAudioControlPropertyElement:
+                case kAudioSelectorControlPropertyAvailableItems:
+                case kAudioSelectorControlPropertyItemName:
+                    *outIsSettable = false;
+                    break;
+
+                    // 可写属性
+                case kAudioSelectorControlPropertyCurrentItem:
+                    *outIsSettable = true;
+                    break;
+
+                    // 未知属性
+                default:
+                    theAnswer = kAudioHardwareUnknownPropertyError;
+                    break;
+            }
+            break;
+
+            // 未知对象
+        default:
+            theAnswer = kAudioHardwareBadObjectError;
             break;
     }
 

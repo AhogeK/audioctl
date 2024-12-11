@@ -176,4 +176,29 @@ static Boolean VirtualAudioDriver_HasControlProperty(AudioServerPlugInDriverRef 
                                                      pid_t inClientProcessID,
                                                      const AudioObjectPropertyAddress *inAddress);
 
+static OSStatus
+VirtualAudioDriver_IsPlugInPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                            pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                            Boolean *outIsSettable);
+
+static OSStatus VirtualAudioDriver_IsBoxPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         Boolean *outIsSettable);
+
+static OSStatus
+VirtualAudioDriver_IsDevicePropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                            pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                            Boolean *outIsSettable);
+
+static OSStatus
+VirtualAudioDriver_IsStreamPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                            pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                            Boolean *outIsSettable);
+
+static OSStatus
+VirtualAudioDriver_IsControlPropertySettable(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                             pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                             Boolean *outIsSettable);
+
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DRIVER_H
