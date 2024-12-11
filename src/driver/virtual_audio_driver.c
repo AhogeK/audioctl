@@ -2218,39 +2218,18 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
             // 设备拥有其流和控制。注意返回的内容取决于请求的范围
             switch (inAddress->mScope) {
                 case kAudioObjectPropertyScopeGlobal:
-                    // 全局范围意味着返回所有对象
-                    if (theNumberItemsToFetch > 9) {
-                        theNumberItemsToFetch = 9;
-                    }
-
-                    // 填充列表，返回所有请求的对象
-                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
-                        ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Stream_Input + theItemIndex;
-                    }
-                    break;
-
-                case kAudioObjectPropertyScopeInput:
-                    // 输入范围意味着只返回输入端的对象
-                    if (theNumberItemsToFetch > 4) {
-                        theNumberItemsToFetch = 4;
-                    }
-
-                    // 填充列表，返回正确的对象
-                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
-                        ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Stream_Input + theItemIndex;
-                    }
-                    break;
-
                 case kAudioObjectPropertyScopeOutput:
-                    // 输出范围意味着只返回输出端的对象
+                    // 输出范围返回输出相关对象
                     if (theNumberItemsToFetch > 4) {
                         theNumberItemsToFetch = 4;
                     }
-
-                    // 填充列表，返回正确的对象
                     for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
                         ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Stream_Output + theItemIndex;
                     }
+                    break;
+                default:
+                    // 输入范围返回空
+                    theNumberItemsToFetch = 0;
                     break;
             }
 
@@ -2344,7 +2323,13 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
                            theAnswer = kAudioHardwareBadPropertySizeError,
                            Done,
                            "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyDeviceCanBeDefaultDevice 返回值空间不足");
-            *((UInt32 *) outData) = 1;
+
+            // 只允许作为输出设备
+            if (inAddress->mScope == kAudioObjectPropertyScopeOutput) {
+                *((UInt32 *) outData) = 1;
+            } else {
+                *((UInt32 *) outData) = 0;
+            }
             *outDataSize = sizeof(UInt32);
             break;
 
@@ -2375,42 +2360,18 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
             // 返回的内容取决于请求的范围
             switch (inAddress->mScope) {
                 case kAudioObjectPropertyScopeGlobal:
-                    // 全局范围意味着返回所有流
-                    if (theNumberItemsToFetch > 2) {
-                        theNumberItemsToFetch = 2;
-                    }
-
-                    // 填充列表，返回所有请求的流对象
-                    if (theNumberItemsToFetch > 0) {
-                        ((AudioObjectID *) outData)[0] = kObjectID_Stream_Input;
-                    }
-                    if (theNumberItemsToFetch > 1) {
-                        ((AudioObjectID *) outData)[1] = kObjectID_Stream_Output;
-                    }
-                    break;
-
-                case kAudioObjectPropertyScopeInput:
-                    // 输入范围意味着只返回输入端的流对象
-                    if (theNumberItemsToFetch > 1) {
-                        theNumberItemsToFetch = 1;
-                    }
-
-                    // 填充列表，返回输入流对象
-                    if (theNumberItemsToFetch > 0) {
-                        ((AudioObjectID *) outData)[0] = kObjectID_Stream_Input;
-                    }
-                    break;
-
                 case kAudioObjectPropertyScopeOutput:
-                    // 输出范围意味着只返回输出端的流对象
+                    // 输出范围返回输出流
                     if (theNumberItemsToFetch > 1) {
                         theNumberItemsToFetch = 1;
                     }
-
-                    // 填充列表，返回输出流对象
                     if (theNumberItemsToFetch > 0) {
                         ((AudioObjectID *) outData)[0] = kObjectID_Stream_Output;
                     }
+                    break;
+                default:
+                    // 输入范围返回空
+                    theNumberItemsToFetch = 0;
                     break;
             }
 
@@ -2421,20 +2382,17 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
         case kAudioObjectPropertyControlList:
             // 计算请求的项目数量
             theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
-            if (theNumberItemsToFetch > 7) {
-                theNumberItemsToFetch = 7;
+
+            // 只返回输出控制
+            if (theNumberItemsToFetch > 4) {
+                theNumberItemsToFetch = 4;
             }
 
-            // 填充列表，返回所有请求的控制对象
+            // 只填充输出控制对象
             for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
-                if (theItemIndex < 3) {
-                    ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Volume_Input_Master + theItemIndex;
-                } else {
-                    ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Volume_Output_Master + (theItemIndex - 3);
-                }
+                ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Volume_Output_Master + theItemIndex;
             }
 
-            // 报告写入了多少数据
             *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
             break;
 
@@ -4359,7 +4317,7 @@ static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef 
                                                      Boolean *outWillDo,
                                                      Boolean *outWillDoInPlace) {
     // 此方法返回设备是否将执行给定的 IO 操作。
-    // 对于此设备，我们仅支持读取输入数据和写入输出数据。
+    // 对于此设备，我们只支持写入输出数据。
 
 #pragma unused(inClientID)
 
