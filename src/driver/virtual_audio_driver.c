@@ -629,6 +629,104 @@ static OSStatus VirtualAudioDriver_GetPropertyDataSize(AudioServerPlugInDriverRe
     return theAnswer;
 }
 
+static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                   pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
+                                                   UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                   UInt32 inDataSize, UInt32 *outDataSize, void *outData) {
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_GetPropertyData: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetPropertyData: 地址为空");
+    FailWithAction(outDataSize == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetPropertyData: 没有地方存放返回值大小");
+    FailWithAction(outData == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetPropertyData: 没有地方存放返回值");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    //
+    // 另外，由于大部分返回的数据是静态的，很少需要锁定状态互斥锁。
+    switch (inObjectID) {
+        case kObjectID_PlugIn:
+            theAnswer = VirtualAudioDriver_GetPlugInPropertyData(inDriver,
+                                                                 inObjectID,
+                                                                 inClientProcessID,
+                                                                 inAddress,
+                                                                 inQualifierDataSize,
+                                                                 inQualifierData,
+                                                                 inDataSize,
+                                                                 outDataSize,
+                                                                 outData);
+            break;
+
+        case kObjectID_Box:
+            theAnswer = VirtualAudioDriver_GetBoxPropertyData(inDriver,
+                                                              inObjectID,
+                                                              inClientProcessID,
+                                                              inAddress,
+                                                              inQualifierDataSize,
+                                                              inQualifierData,
+                                                              inDataSize,
+                                                              outDataSize,
+                                                              outData);
+            break;
+
+        case kObjectID_Device:
+            theAnswer = VirtualAudioDriver_GetDevicePropertyData(inDriver,
+                                                                 inObjectID,
+                                                                 inClientProcessID,
+                                                                 inAddress,
+                                                                 inQualifierDataSize,
+                                                                 inQualifierData,
+                                                                 inDataSize,
+                                                                 outDataSize,
+                                                                 outData);
+            break;
+
+        case kObjectID_Stream_Input:
+        case kObjectID_Stream_Output:
+            theAnswer = VirtualAudioDriver_GetStreamPropertyData(inDriver,
+                                                                 inObjectID,
+                                                                 inClientProcessID,
+                                                                 inAddress,
+                                                                 inQualifierDataSize,
+                                                                 inQualifierData,
+                                                                 inDataSize,
+                                                                 outDataSize,
+                                                                 outData);
+            break;
+
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            theAnswer = VirtualAudioDriver_GetControlPropertyData(inDriver,
+                                                                  inObjectID,
+                                                                  inClientProcessID,
+                                                                  inAddress,
+                                                                  inQualifierDataSize,
+                                                                  inQualifierData,
+                                                                  inDataSize,
+                                                                  outDataSize,
+                                                                  outData);
+            break;
+
+        default:
+            theAnswer = kAudioHardwareBadObjectError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
 #pragma mark PlugIn Property Operations
 
 static Boolean VirtualAudioDriver_HasPlugInProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
@@ -807,6 +905,197 @@ VirtualAudioDriver_GetPlugInPropertyDataSize(AudioServerPlugInDriverRef inDriver
             DebugMsg("VirtualAudioDriver_GetPlugInPropertyDataSize: 传递给我们的限定符是:");
             CFShow(*((const CFPropertyListRef *) inQualifierData));
             *outDataSize = sizeof(CFPropertyListRef);
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_GetPlugInPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                         UInt32 inDataSize, UInt32 *outDataSize, void *outData) {
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    UInt32 theNumberItemsToFetch;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_GetPlugInPropertyData: 无效的驱动程序引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetPlugInPropertyData: 地址为空");
+    FailWithAction(outDataSize == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetPlugInPropertyData: 没有地方存放返回值大小");
+    FailWithAction(outData == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetPlugInPropertyData: 没有地方存放返回值");
+    FailWithAction(inObjectID != kObjectID_PlugIn, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_GetPlugInPropertyData: 不是插件对象");
+
+    // 处理不同的属性选择器
+    switch (inAddress->mSelector) {
+        case kAudioObjectPropertyBaseClass:
+            // 插件的基类是 kAudioObjectClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回插件的 kAudioObjectPropertyBaseClass");
+            *((AudioClassID *) outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyClass:
+            // 常规驱动的类总是 kAudioPlugInClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回插件的 kAudioObjectPropertyClass");
+            *((AudioClassID *) outData) = kAudioPlugInClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyOwner:
+            // 插件没有所有者对象
+            FailWithAction(inDataSize < sizeof(AudioObjectID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回插件的 kAudioObjectPropertyOwner");
+            *((AudioObjectID *) outData) = kAudioObjectUnknown;
+            *outDataSize = sizeof(AudioObjectID);
+            break;
+
+        case kAudioObjectPropertyManufacturer:
+            // 插件制造商的可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回插件的 kAudioObjectPropertyManufacturer");
+            *((CFStringRef *) outData) = CFSTR("Virtual Audio Driver");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyOwnedObjects:
+            // 计算请求的项目数量
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+
+            // 限制为驱动程序实现的盒子数量（只有1个）
+            if (theNumberItemsToFetch > (gBox_Acquired ? 2 : 1)) {
+                theNumberItemsToFetch = (gBox_Acquired ? 2 : 1);
+            }
+
+            // 将设备的对象ID写入返回值
+            if (theNumberItemsToFetch > 1) {
+                ((AudioObjectID *) outData)[0] = kObjectID_Box;
+                ((AudioObjectID *) outData)[1] = kObjectID_Device;
+            } else if (theNumberItemsToFetch > 0) {
+                ((AudioObjectID *) outData)[0] = kObjectID_Box;
+            }
+
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioClassID);
+            break;
+
+        case kAudioPlugInPropertyBoxList:
+            // 计算请求的项目数量
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+
+            // 限制为驱动程序实现的盒子数量（只有1个）
+            if (theNumberItemsToFetch > 1) {
+                theNumberItemsToFetch = 1;
+            }
+
+            // 将设备的对象ID写入返回值
+            if (theNumberItemsToFetch > 0) {
+                ((AudioObjectID *) outData)[0] = kObjectID_Box;
+            }
+
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioClassID);
+            break;
+
+        case kAudioPlugInPropertyTranslateUIDToBox:
+            // 将CFString限定符转换为对应的盒子对象ID
+            FailWithAction(inDataSize < sizeof(AudioObjectID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回 kAudioPlugInPropertyTranslateUIDToBox");
+            FailWithAction(inQualifierDataSize != sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: kAudioPlugInPropertyTranslateUIDToBox 的限定符大小错误");
+            FailWithAction(inQualifierData == NULL, theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: kAudioPlugInPropertyTranslateUIDToBox 没有限定符");
+
+            if (CFStringCompare(*((CFStringRef *) inQualifierData), CFSTR(kBox_UID), 0) == kCFCompareEqualTo) {
+                *((AudioObjectID *) outData) = kObjectID_Box;
+            } else {
+                *((AudioObjectID *) outData) = kAudioObjectUnknown;
+            }
+            *outDataSize = sizeof(AudioObjectID);
+            break;
+
+        case kAudioPlugInPropertyDeviceList:
+            // 计算请求的项目数量
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+
+            // 限制为驱动程序实现的设备数量
+            if (theNumberItemsToFetch > (gBox_Acquired ? 1 : 0)) {
+                theNumberItemsToFetch = (gBox_Acquired ? 1 : 0);
+            }
+
+            // 将设备的对象ID写入返回值
+            if (theNumberItemsToFetch > 0) {
+                ((AudioObjectID *) outData)[0] = kObjectID_Device;
+            }
+
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioClassID);
+            break;
+
+        case kAudioPlugInPropertyTranslateUIDToDevice:
+            // 将CFString限定符转换为对应的设备对象ID
+            FailWithAction(inDataSize < sizeof(AudioObjectID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回 kAudioPlugInPropertyTranslateUIDToDevice");
+            FailWithAction(inQualifierDataSize != sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: kAudioPlugInPropertyTranslateUIDToDevice 的限定符大小错误");
+            FailWithAction(inQualifierData == NULL, theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: kAudioPlugInPropertyTranslateUIDToDevice 没有限定符");
+
+            if (CFStringCompare(*((CFStringRef *) inQualifierData), CFSTR(kDevice_UID), 0) == kCFCompareEqualTo) {
+                *((AudioObjectID *) outData) = kObjectID_Device;
+            } else {
+                *((AudioObjectID *) outData) = kAudioObjectUnknown;
+            }
+            *outDataSize = sizeof(AudioObjectID);
+            break;
+
+        case kAudioPlugInPropertyResourceBundle:
+            // 资源包是相对于插件包路径的路径
+            // 要指定应使用插件包本身，我们只返回空字符串
+            FailWithAction(inDataSize < sizeof(AudioObjectID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回 kAudioPlugInPropertyResourceBundle");
+            *((CFStringRef *) outData) = CFSTR("");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyCustomPropertyInfoList:
+            // 返回描述自定义属性数据类型的 AudioServerPlugInCustomPropertyInfo 数组
+            FailWithAction(inDataSize < sizeof(AudioServerPlugInCustomPropertyInfo),
+                           theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回 kAudioObjectPropertyCustomPropertyInfoList");
+            ((AudioServerPlugInCustomPropertyInfo *) outData)->mSelector = kPlugIn_CustomPropertyID;
+            ((AudioServerPlugInCustomPropertyInfo *) outData)->mPropertyDataType = kAudioServerPlugInCustomPropertyDataTypeCFString;
+            ((AudioServerPlugInCustomPropertyInfo *) outData)->mQualifierDataType = kAudioServerPlugInCustomPropertyDataTypeCFPropertyList;
+            *outDataSize = sizeof(AudioServerPlugInCustomPropertyInfo);
+            break;
+
+        case kPlugIn_CustomPropertyID:
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: 空间不足以返回 kPlugIn_CustomPropertyID");
+            FailWithAction(inQualifierDataSize != sizeof(CFPropertyListRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: kPlugIn_CustomPropertyID 的限定符大小错误");
+            FailWithAction(inQualifierData == NULL, theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetPlugInPropertyData: kPlugIn_CustomPropertyID 没有限定符");
+
+            DebugMsg("VirtualAudioDriver_GetPlugInPropertyData: 传递给我们的限定符是:");
+            CFShow(*((CFPropertyListRef *) inQualifierData));
+            *((CFStringRef *) outData) = CFSTR("Virtual Audio Driver Custom Property");
+            *outDataSize = sizeof(CFStringRef);
             break;
 
         default:
@@ -997,6 +1286,208 @@ static OSStatus VirtualAudioDriver_GetBoxPropertyDataSize(AudioServerPlugInDrive
             *outDataSize = gBox_Acquired ? sizeof(AudioObjectID) : 0;
             pthread_mutex_unlock(&gPlugIn_StateMutex);
         }
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_GetBoxPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                      AudioObjectID inObjectID,
+                                                      pid_t inClientProcessID,
+                                                      const AudioObjectPropertyAddress *inAddress,
+                                                      UInt32 inQualifierDataSize,
+                                                      const void *inQualifierData,
+                                                      UInt32 inDataSize,
+                                                      UInt32 *outDataSize,
+                                                      void *outData) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_GetBoxPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetBoxPropertyData: 地址为空");
+    FailWithAction(outDataSize == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetBoxPropertyData: 没有地方存放返回值大小");
+    FailWithAction(outData == NULL, theAnswer = kAudioHardwareIllegalOperationError, Done,
+                   "VirtualAudioDriver_GetBoxPropertyData: 没有地方存放返回值");
+    FailWithAction(inObjectID != kObjectID_Box, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_GetBoxPropertyData: 不是插件对象");
+
+    // 注意对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性
+    //
+    // 另外，由于大多数将要返回的数据是静态的，很少需要锁定状态互斥锁
+
+    switch (inAddress->mSelector) {
+        case kAudioObjectPropertyBaseClass:
+            // kAudioBoxClassID 的基类是 kAudioObjectClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyBaseClass返回值空间不足");
+            *((AudioClassID *) outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyClass:
+            // 对于常规驱动程序，类始终是 kAudioBoxClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyClass返回值空间不足");
+            *((AudioClassID *) outData) = kAudioBoxClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyOwner:
+            // 所有者是插件对象
+            FailWithAction(inDataSize < sizeof(AudioObjectID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyOwner返回值空间不足");
+            *((AudioObjectID *) outData) = kObjectID_PlugIn;
+            *outDataSize = sizeof(AudioObjectID);
+            break;
+
+        case kAudioObjectPropertyName:
+            // 这是box制造商的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            *((CFStringRef *) outData) = gBox_Name;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            if (*((CFStringRef *) outData) != NULL) {
+                CFRetain(*((CFStringRef *) outData));
+            }
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyModelName:
+            // 这是box型号的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR("虚拟音频设备");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyManufacturer:
+            // 这是box制造商的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR("虚拟音频制造商");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyOwnedObjects:
+            // 这返回对象直接拥有的对象。Box不拥有任何对象
+            *outDataSize = 0;
+            break;
+
+        case kAudioObjectPropertyIdentify:
+            // 这用于在UI中高亮显示设备，但其值没有实际意义
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyIdentify返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioObjectPropertySerialNumber:
+            // 这是box的人类可读序列号
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertySerialNumber返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR("00000001");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyFirmwareVersion:
+            // 这是box的人类可读固件版本
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyFirmwareVersion返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR("1.0");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioBoxPropertyBoxUID:
+            // Box和设备一样具有UID
+            FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR(kBox_UID);
+            break;
+
+        case kAudioBoxPropertyTransportType:
+            // 此值表示设备如何连接到系统。这可以是任何32位整数，
+            // 但此属性的常用值在 <CoreAudio/AudioHardwareBase.h> 中定义
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioDevicePropertyTransportType返回值空间不足");
+            *((UInt32 *) outData) = kAudioDeviceTransportTypeVirtual;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyHasAudio:
+            // 指示box是否具有音频功能
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyHasAudio返回值空间不足");
+            *((UInt32 *) outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyHasVideo:
+            // 指示box是否具有视频功能
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyHasVideo返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyHasMIDI:
+            // 指示box是否具有MIDI功能
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyHasMIDI返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyIsProtected:
+            // 指示box是否需要认证才能使用
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyIsProtected返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyAcquired:
+            // 当设置为非零值时，设备被本地机器获取使用
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyAcquired返回值空间不足");
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            *((UInt32 *) outData) = gBox_Acquired ? 1 : 0;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyAcquisitionFailed:
+            // 这用于通知尝试获取设备失败的情况
+            FailWithAction(inDataSize < sizeof(UInt32), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                           "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyAcquisitionFailed返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioBoxPropertyDeviceList:
+            // 这用于指示哪些设备来自这个box
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            if (gBox_Acquired) {
+                FailWithAction(inDataSize < sizeof(AudioObjectID), theAnswer = kAudioHardwareBadPropertySizeError, Done,
+                               "VirtualAudioDriver_GetBoxPropertyData: box的kAudioBoxPropertyDeviceList返回值空间不足");
+                *((AudioObjectID *) outData) = kObjectID_Device;
+                *outDataSize = sizeof(AudioObjectID);
+            } else {
+                *outDataSize = 0;
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
             break;
 
         default:
@@ -1275,6 +1766,486 @@ VirtualAudioDriver_GetDevicePropertyDataSize(AudioServerPlugInDriverRef inDriver
     return theAnswer;
 }
 
+static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         UInt32 *outDataSize,
+                                                         void *outData) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    UInt32 theNumberItemsToFetch;
+    UInt32 theItemIndex;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetDevicePropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetDevicePropertyData: 地址为空");
+    FailWithAction(outDataSize == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetDevicePropertyData: 没有地方存放返回值大小");
+    FailWithAction(outData == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetDevicePropertyData: 没有地方存放返回值");
+    FailWithAction(inObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetDevicePropertyData: 不是设备对象");
+
+    // 注意对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性
+    //
+    // 另外，由于大多数将要返回的数据是静态的，很少需要锁定状态互斥锁
+
+    switch (inAddress->mSelector) {
+        case kAudioObjectPropertyBaseClass:
+            // kAudioDeviceClassID 的基类是 kAudioObjectClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyBaseClass 返回值空间不足");
+            *((AudioClassID *) outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyClass:
+            // 设备创建者的类始终是 kAudioDeviceClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyClass 返回值空间不足");
+            *((AudioClassID *) outData) = kAudioDeviceClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyOwner:
+            // 设备的所有者是插件对象
+            FailWithAction(inDataSize < sizeof(AudioObjectID),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyOwner 返回值空间不足");
+            *((AudioObjectID *) outData) = kObjectID_PlugIn;
+            *outDataSize = sizeof(AudioObjectID);
+            break;
+
+        case kAudioObjectPropertyName:
+            // 这是设备的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyName 返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR("虚拟音频设备");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyManufacturer:
+            // 这是插件制造商的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyManufacturer 返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR("虚拟音频制造商");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyElementName:
+            // 这是元素的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioObjectPropertyElementName 返回值空间不足");
+            switch (inAddress->mElement) {
+                case 0:
+                    *((CFStringRef *) outData) = CFSTR("主声道");
+                    break;
+                case 1:
+                    *((CFStringRef *) outData) = CFSTR("左声道");
+                    break;
+                case 2:
+                    *((CFStringRef *) outData) = CFSTR("右声道");
+                    break;
+                default:
+                    *((CFStringRef *) outData) = CFSTR("未知声道");
+                    break;
+            }
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioObjectPropertyOwnedObjects:
+            // 计算请求的项目数量。注意这个数量可以小于实际列表的大小
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+
+            // 设备拥有其流和控制。注意返回的内容取决于请求的范围
+            switch (inAddress->mScope) {
+                case kAudioObjectPropertyScopeGlobal:
+                    // 全局范围意味着返回所有对象
+                    if (theNumberItemsToFetch > 9) {
+                        theNumberItemsToFetch = 9;
+                    }
+
+                    // 填充列表，返回所有请求的对象
+                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
+                        ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Stream_Input + theItemIndex;
+                    }
+                    break;
+
+                case kAudioObjectPropertyScopeInput:
+                    // 输入范围意味着只返回输入端的对象
+                    if (theNumberItemsToFetch > 4) {
+                        theNumberItemsToFetch = 4;
+                    }
+
+                    // 填充列表，返回正确的对象
+                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
+                        ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Stream_Input + theItemIndex;
+                    }
+                    break;
+
+                case kAudioObjectPropertyScopeOutput:
+                    // 输出范围意味着只返回输出端的对象
+                    if (theNumberItemsToFetch > 4) {
+                        theNumberItemsToFetch = 4;
+                    }
+
+                    // 填充列表，返回正确的对象
+                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
+                        ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Stream_Output + theItemIndex;
+                    }
+                    break;
+            }
+
+            // 报告写入了多少数据
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
+            break;
+
+        case kAudioDevicePropertyDeviceUID:
+            // 这是一个可以在不同启动会话中识别相同音频设备的持久令牌
+            FailWithAction(inDataSize < sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyDeviceUID 返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR(kDevice_UID);
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioDevicePropertyModelUID:
+            // 这是一个可以识别相同类型设备的持久令牌
+            FailWithAction(inDataSize < sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyModelUID 返回值空间不足");
+            *((CFStringRef *) outData) = CFSTR(kDevice_ModelUID);
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioDevicePropertyTransportType:
+            // 此值表示设备如何连接到系统
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyTransportType 返回值空间不足");
+            *((UInt32 *) outData) = kAudioDeviceTransportTypeVirtual;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyRelatedDevices:
+            // 相关设备属性标识非常密切相关的设备对象
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+
+            // 我们只有一个设备
+            if (theNumberItemsToFetch > 1) {
+                theNumberItemsToFetch = 1;
+            }
+
+            // 将设备的对象ID写入返回值
+            if (theNumberItemsToFetch > 0) {
+                ((AudioObjectID *) outData)[0] = kObjectID_Device;
+            }
+
+            // 报告写入了多少数据
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
+            break;
+
+        case kAudioDevicePropertyClockDomain:
+            // 此属性允许设备声明它在硬件中与哪些其他设备同步
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyClockDomain 返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyDeviceIsAlive:
+            // 此属性返回设备是否处于活动状态
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyDeviceIsAlive 返回值空间不足");
+            *((UInt32 *) outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyDeviceIsRunning:
+            // 此属性返回设备的IO是否正在运行
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyDeviceIsRunning 返回值空间不足");
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            *((UInt32 *) outData) = (gDevice_IOIsRunning > 0) ? 1 : 0;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyDeviceCanBeDefaultDevice:
+            // 此属性返回设备是否可以作为默认设备
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyDeviceCanBeDefaultDevice 返回值空间不足");
+            *((UInt32 *) outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
+            // 此属性返回设备是否可以作为系统默认设备
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyDeviceCanBeDefaultSystemDevice 返回值空间不足");
+            *((UInt32 *) outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyLatency:
+            // 此属性返回设备的呈现延迟
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyLatency 返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyStreams:
+            // 计算请求的项目数量
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+
+            // 返回的内容取决于请求的范围
+            switch (inAddress->mScope) {
+                case kAudioObjectPropertyScopeGlobal:
+                    // 全局范围意味着返回所有流
+                    if (theNumberItemsToFetch > 2) {
+                        theNumberItemsToFetch = 2;
+                    }
+
+                    // 填充列表，返回所有请求的流对象
+                    if (theNumberItemsToFetch > 0) {
+                        ((AudioObjectID *) outData)[0] = kObjectID_Stream_Input;
+                    }
+                    if (theNumberItemsToFetch > 1) {
+                        ((AudioObjectID *) outData)[1] = kObjectID_Stream_Output;
+                    }
+                    break;
+
+                case kAudioObjectPropertyScopeInput:
+                    // 输入范围意味着只返回输入端的流对象
+                    if (theNumberItemsToFetch > 1) {
+                        theNumberItemsToFetch = 1;
+                    }
+
+                    // 填充列表，返回输入流对象
+                    if (theNumberItemsToFetch > 0) {
+                        ((AudioObjectID *) outData)[0] = kObjectID_Stream_Input;
+                    }
+                    break;
+
+                case kAudioObjectPropertyScopeOutput:
+                    // 输出范围意味着只返回输出端的流对象
+                    if (theNumberItemsToFetch > 1) {
+                        theNumberItemsToFetch = 1;
+                    }
+
+                    // 填充列表，返回输出流对象
+                    if (theNumberItemsToFetch > 0) {
+                        ((AudioObjectID *) outData)[0] = kObjectID_Stream_Output;
+                    }
+                    break;
+            }
+
+            // 报告写入了多少数据
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
+            break;
+
+        case kAudioObjectPropertyControlList:
+            // 计算请求的项目数量
+            theNumberItemsToFetch = inDataSize / sizeof(AudioObjectID);
+            if (theNumberItemsToFetch > 7) {
+                theNumberItemsToFetch = 7;
+            }
+
+            // 填充列表，返回所有请求的控制对象
+            for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
+                if (theItemIndex < 3) {
+                    ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Volume_Input_Master + theItemIndex;
+                } else {
+                    ((AudioObjectID *) outData)[theItemIndex] = kObjectID_Volume_Output_Master + (theItemIndex - 3);
+                }
+            }
+
+            // 报告写入了多少数据
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
+            break;
+
+        case kAudioDevicePropertySafetyOffset:
+            // 此属性返回HAL可以读取和写入的最近距离
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertySafetyOffset 返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyNominalSampleRate:
+            // 此属性返回设备的标称采样率
+            FailWithAction(inDataSize < sizeof(Float64),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyNominalSampleRate 返回值空间不足");
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            *((Float64 *) outData) = gDevice_SampleRate;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            *outDataSize = sizeof(Float64);
+            break;
+
+        case kAudioDevicePropertyAvailableNominalSampleRates:
+            // 此属性返回设备支持的所有标称采样率
+            theNumberItemsToFetch = inDataSize / sizeof(AudioValueRange);
+
+            // 限制返回的项目数量
+            if (theNumberItemsToFetch > 2) {
+                theNumberItemsToFetch = 2;
+            }
+
+            // 填充返回数组
+            if (theNumberItemsToFetch > 0) {
+                ((AudioValueRange *) outData)[0].mMinimum = 44100.0;
+                ((AudioValueRange *) outData)[0].mMaximum = 44100.0;
+            }
+            if (theNumberItemsToFetch > 1) {
+                ((AudioValueRange *) outData)[1].mMinimum = 48000.0;
+                ((AudioValueRange *) outData)[1].mMaximum = 48000.0;
+            }
+
+            // 报告写入了多少数据
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioValueRange);
+            break;
+
+        case kAudioDevicePropertyIsHidden:
+            // 返回设备是否对客户端可见
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyIsHidden 返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyPreferredChannelsForStereo:
+            // 返回默认的立体声左右声道
+            FailWithAction(inDataSize < (2 * sizeof(UInt32)),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyPreferredChannelsForStereo 返回值空间不足");
+            ((UInt32 *) outData)[0] = 1;
+            ((UInt32 *) outData)[1] = 2;
+            *outDataSize = 2 * sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyPreferredChannelLayout: {
+            // 返回设备的默认AudioChannelLayout
+            const UInt32 numChannels = 2;  // 明确声明通道数
+            UInt32 theACLSize = offsetof(AudioChannelLayout, mChannelDescriptions) +
+                                (numChannels * sizeof(AudioChannelDescription));
+
+            // 检查输入缓冲区大小
+            FailWithAction(inDataSize < theACLSize,
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyPreferredChannelLayout 返回值空间不足");
+
+            AudioChannelLayout *layout = (AudioChannelLayout *) outData;
+            layout->mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions;
+            layout->mChannelBitmap = 0;
+            layout->mNumberChannelDescriptions = numChannels;
+
+            // 使用明确的边界检查
+            for (theItemIndex = 0; theItemIndex < numChannels && theItemIndex < 2; ++theItemIndex) {
+                layout->mChannelDescriptions[theItemIndex].mChannelLabel =
+                        (theItemIndex == 0) ? kAudioChannelLabel_Left : kAudioChannelLabel_Right;
+                layout->mChannelDescriptions[theItemIndex].mChannelFlags = 0;
+                layout->mChannelDescriptions[theItemIndex].mCoordinates[0] = 0;
+                layout->mChannelDescriptions[theItemIndex].mCoordinates[1] = 0;
+                layout->mChannelDescriptions[theItemIndex].mCoordinates[2] = 0;
+            }
+
+            *outDataSize = theACLSize;
+        }
+            break;
+
+        case kAudioDevicePropertyZeroTimeStampPeriod:
+            // 此属性返回HAL在零时间戳之间应期待的帧数
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyZeroTimeStampPeriod 返回值空间不足");
+            *((UInt32 *) outData) = kDevice_RingBufferSize;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioDevicePropertyIcon: {
+            // 这是指向设备图标的 CFURL
+            FailWithAction(inDataSize < sizeof(CFURLRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 设备的 kAudioDevicePropertyIcon 返回值空间不足");
+            CFBundleRef theBundle = CFBundleGetBundleWithIdentifier(CFSTR(kPlugIn_BundleID));
+            FailWithAction(theBundle == NULL,
+                           theAnswer = kAudioHardwareUnspecifiedError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 无法获取插件包的 kAudioDevicePropertyIcon");
+            CFURLRef theURL = CFBundleCopyResourceURL(theBundle, CFSTR("DeviceIcon.icns"), NULL, NULL);
+            FailWithAction(theURL == NULL,
+                           theAnswer = kAudioHardwareUnspecifiedError,
+                           Done,
+                           "VirtualAudioDriver_GetDevicePropertyData: 无法获取 kAudioDevicePropertyIcon 的 URL");
+            *((CFURLRef *) outData) = theURL;
+            *outDataSize = sizeof(CFURLRef);
+        }
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
 #pragma mark Stream Property Operations
 
 static Boolean VirtualAudioDriver_HasStreamProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
@@ -1453,6 +2424,223 @@ VirtualAudioDriver_GetStreamPropertyDataSize(AudioServerPlugInDriverRef inDriver
             theAnswer = kAudioHardwareUnknownPropertyError;
             break;
     }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_GetStreamPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         UInt32 *outDataSize,
+                                                         void *outData) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    UInt32 theNumberItemsToFetch;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetStreamPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetStreamPropertyData: 地址为空");
+    FailWithAction(outDataSize == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetStreamPropertyData: 没有地方存放返回值大小");
+    FailWithAction(outData == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetStreamPropertyData: 没有地方存放返回值");
+    FailWithAction((inObjectID != kObjectID_Stream_Input) && (inObjectID != kObjectID_Stream_Output),
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetStreamPropertyData: 不是流对象");
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    // 此外，由于大多数将要返回的数据是静态的，很少需要锁定状态互斥锁。
+
+    switch (inAddress->mSelector) {
+        case kAudioObjectPropertyBaseClass:
+            // kAudioStreamClassID 的基类是 kAudioObjectClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioObjectPropertyBaseClass 返回值空间不足");
+            *((AudioClassID *) outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyClass:
+            // 流创建者的类始终是 kAudioStreamClassID
+            FailWithAction(inDataSize < sizeof(AudioClassID),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioObjectPropertyClass 返回值空间不足");
+            *((AudioClassID *) outData) = kAudioStreamClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+
+        case kAudioObjectPropertyOwner:
+            // 流的所有者是设备对象
+            FailWithAction(inDataSize < sizeof(AudioObjectID),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioObjectPropertyOwner 返回值空间不足");
+            *((AudioObjectID *) outData) = kObjectID_Device;
+            *outDataSize = sizeof(AudioObjectID);
+            break;
+
+        case kAudioObjectPropertyOwnedObjects:
+            // 流不拥有任何对象
+            *outDataSize = 0 * sizeof(AudioObjectID);
+            break;
+
+        case kAudioObjectPropertyName:
+            // 这是流的人类可读名称
+            FailWithAction(inDataSize < sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioObjectPropertyName 返回值空间不足");
+            *((CFStringRef *) outData) = (inObjectID == kObjectID_Stream_Input) ? CFSTR("输入流名称") : CFSTR(
+                    "输出流名称");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+
+        case kAudioStreamPropertyIsActive:
+            // 此属性告诉设备给定流是否用于IO。注意需要锁定状态以检查此值。
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioStreamPropertyIsActive 返回值空间不足");
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            *((UInt32 *) outData) = (inObjectID == kObjectID_Stream_Input) ? gStream_Input_IsActive
+                                                                           : gStream_Output_IsActive;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioStreamPropertyDirection:
+            // 返回流是输入流还是输出流。
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioStreamPropertyDirection 返回值空间不足");
+            *((UInt32 *) outData) = (inObjectID == kObjectID_Stream_Input) ? 1 : 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioStreamPropertyTerminalType:
+            // 返回流的另一端的类型，例如扬声器或麦克风。此属性的值在 <CoreAudio/AudioHardwareBase.h> 中定义。
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioStreamPropertyTerminalType 返回值空间不足");
+            *((UInt32 *) outData) = (inObjectID == kObjectID_Stream_Input) ? kAudioStreamTerminalTypeMicrophone
+                                                                           : kAudioStreamTerminalTypeSpeaker;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioStreamPropertyStartingChannel:
+            // 返回流的第一个通道的绝对通道号。
+            // 例如，如果设备有两个输出流，每个流有两个通道，那么第一个流的起始通道号为1，第二个流的起始通道号为3。
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioStreamPropertyStartingChannel 返回值空间不足");
+            *((UInt32 *) outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioStreamPropertyLatency:
+            // 返回流的额外呈现延迟。
+            FailWithAction(inDataSize < sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioStreamPropertyLatency 返回值空间不足");
+            *((UInt32 *) outData) = 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+
+        case kAudioStreamPropertyVirtualFormat:
+        case kAudioStreamPropertyPhysicalFormat:
+            // 返回流的当前格式（使用 AudioStreamBasicDescription）。
+            // 注意需要持有状态锁以获取此值。
+            // 对于不覆盖混合操作的设备，虚拟格式必须与物理格式相同。
+            FailWithAction(inDataSize < sizeof(AudioStreamBasicDescription),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_GetStreamPropertyData: 流的 kAudioStreamPropertyVirtualFormat 返回值空间不足");
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            ((AudioStreamBasicDescription *) outData)->mSampleRate = gDevice_SampleRate;
+            ((AudioStreamBasicDescription *) outData)->mFormatID = kAudioFormatLinearPCM;
+            ((AudioStreamBasicDescription *) outData)->mFormatFlags =
+                    kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
+            ((AudioStreamBasicDescription *) outData)->mBytesPerPacket = 8;
+            ((AudioStreamBasicDescription *) outData)->mFramesPerPacket = 1;
+            ((AudioStreamBasicDescription *) outData)->mBytesPerFrame = 8;
+            ((AudioStreamBasicDescription *) outData)->mChannelsPerFrame = 2;
+            ((AudioStreamBasicDescription *) outData)->mBitsPerChannel = 32;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            *outDataSize = sizeof(AudioStreamBasicDescription);
+            break;
+
+        case kAudioStreamPropertyAvailableVirtualFormats:
+        case kAudioStreamPropertyAvailablePhysicalFormats:
+            // 返回一个描述支持的格式的 AudioStreamRangedDescriptions 数组。
+            // 计算请求的项目数量。注意，该数量可以小于实际列表的大小，在这种情况下，只返回该数量的项目。
+            theNumberItemsToFetch = inDataSize / sizeof(AudioStreamRangedDescription);
+
+            // 将其限制为我们拥有的项目数量。
+            if (theNumberItemsToFetch > 2) {
+                theNumberItemsToFetch = 2;
+            }
+
+            // 填充返回数组。
+            if (theNumberItemsToFetch > 0) {
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mSampleRate = 44100.0;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mFormatID = kAudioFormatLinearPCM;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mFormatFlags =
+                        kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mBytesPerPacket = 8;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mFramesPerPacket = 1;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mBytesPerFrame = 8;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mChannelsPerFrame = 2;
+                ((AudioStreamRangedDescription *) outData)[0].mFormat.mBitsPerChannel = 32;
+                ((AudioStreamRangedDescription *) outData)[0].mSampleRateRange.mMinimum = 44100.0;
+                ((AudioStreamRangedDescription *) outData)[0].mSampleRateRange.mMaximum = 44100.0;
+            }
+            if (theNumberItemsToFetch > 1) {
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mSampleRate = 48000.0;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mFormatID = kAudioFormatLinearPCM;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mFormatFlags =
+                        kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mBytesPerPacket = 8;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mFramesPerPacket = 1;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mBytesPerFrame = 8;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mChannelsPerFrame = 2;
+                ((AudioStreamRangedDescription *) outData)[1].mFormat.mBitsPerChannel = 32;
+                ((AudioStreamRangedDescription *) outData)[1].mSampleRateRange.mMinimum = 48000.0;
+                ((AudioStreamRangedDescription *) outData)[1].mSampleRateRange.mMaximum = 48000.0;
+            }
+
+            // 报告写入了多少数据。
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioStreamRangedDescription);
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    };
 
     Done:
     return theAnswer;
@@ -1799,6 +2987,449 @@ VirtualAudioDriver_GetControlPropertyDataSize(AudioServerPlugInDriverRef inDrive
                     break;
 
                 case kAudioSelectorControlPropertyItemName:
+                    *outDataSize = sizeof(CFStringRef);
+                    break;
+
+                default:
+                    theAnswer = kAudioHardwareUnknownPropertyError;
+                    break;
+            }
+            break;
+
+        default:
+            theAnswer = kAudioHardwareBadObjectError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_GetControlPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                          AudioObjectID inObjectID,
+                                                          pid_t inClientProcessID,
+                                                          const AudioObjectPropertyAddress *inAddress,
+                                                          UInt32 inQualifierDataSize,
+                                                          const void *inQualifierData,
+                                                          UInt32 inDataSize,
+                                                          UInt32 *outDataSize,
+                                                          void *outData) {
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    UInt32 theNumberItemsToFetch;
+    UInt32 theItemIndex;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetControlPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetControlPropertyData: 地址为空");
+    FailWithAction(outDataSize == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetControlPropertyData: 没有地方存放返回值大小");
+    FailWithAction(outData == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_GetControlPropertyData: 没有地方存放返回值");
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    //
+    // 此外，由于大多数将要返回的数据是静态的，很少需要锁定状态互斥锁。
+
+    switch (inObjectID) {
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+            switch (inAddress->mSelector) {
+                case kAudioObjectPropertyBaseClass:
+                    // kAudioVolumeControlClassID 的基类是 kAudioLevelControlClassID
+                    FailWithAction(inDataSize < sizeof(AudioClassID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioObjectPropertyBaseClass 返回值空间不足");
+                    *((AudioClassID *) outData) = kAudioLevelControlClassID;
+                    *outDataSize = sizeof(AudioClassID);
+                    break;
+
+                case kAudioObjectPropertyClass:
+                    // 音量控制属于 kAudioVolumeControlClassID 类
+                    FailWithAction(inDataSize < sizeof(AudioClassID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioObjectPropertyClass 返回值空间不足");
+                    *((AudioClassID *) outData) = kAudioVolumeControlClassID;
+                    *outDataSize = sizeof(AudioClassID);
+                    break;
+
+                case kAudioObjectPropertyOwner:
+                    // 控制器的所有者是设备对象
+                    FailWithAction(inDataSize < sizeof(AudioObjectID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioObjectPropertyOwner 返回值空间不足");
+                    *((AudioObjectID *) outData) = kObjectID_Device;
+                    *outDataSize = sizeof(AudioObjectID);
+                    break;
+
+                case kAudioObjectPropertyOwnedObjects:
+                    // 控制器不拥有任何对象
+                    *outDataSize = 0 * sizeof(AudioObjectID);
+                    break;
+
+                case kAudioControlPropertyScope:
+                    // 此属性返回控制器所附加的范围
+                    FailWithAction(inDataSize < sizeof(AudioObjectPropertyScope),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioControlPropertyScope 返回值空间不足");
+                    *((AudioObjectPropertyScope *) outData) = (inObjectID == kObjectID_Volume_Input_Master) ?
+                                                              kAudioObjectPropertyScopeInput :
+                                                              kAudioObjectPropertyScopeOutput;
+                    *outDataSize = sizeof(AudioObjectPropertyScope);
+                    break;
+
+                case kAudioControlPropertyElement:
+                    // 此属性返回控制器所附加的元素
+                    FailWithAction(inDataSize < sizeof(AudioObjectPropertyElement),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioControlPropertyElement 返回值空间不足");
+                    *((AudioObjectPropertyElement *) outData) = kAudioObjectPropertyElementMain;
+                    *outDataSize = sizeof(AudioObjectPropertyElement);
+                    break;
+
+                case kAudioLevelControlPropertyScalarValue:
+                    // 返回控制器在 0 到 1 的标准化范围内的值
+                    // 注意需要获取状态锁来检查此值
+                    FailWithAction(inDataSize < sizeof(Float32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioLevelControlPropertyScalarValue 返回值空间不足");
+                    pthread_mutex_lock(&gPlugIn_StateMutex);
+                    *((Float32 *) outData) = (inObjectID == kObjectID_Volume_Input_Master) ?
+                                             gVolume_Input_Master_Value :
+                                             gVolume_Output_Master_Value;
+                    pthread_mutex_unlock(&gPlugIn_StateMutex);
+                    *outDataSize = sizeof(Float32);
+                    break;
+
+                case kAudioLevelControlPropertyDecibelValue:
+                    // 返回控制器的分贝值
+                    // 注意需要获取状态锁来检查此值
+                    FailWithAction(inDataSize < sizeof(Float32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioLevelControlPropertyDecibelValue 返回值空间不足");
+                    pthread_mutex_lock(&gPlugIn_StateMutex);
+                    *((Float32 *) outData) = (inObjectID == kObjectID_Volume_Input_Master) ?
+                                             gVolume_Input_Master_Value :
+                                             gVolume_Output_Master_Value;
+                    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+                    // 注意在转换为分贝之前我们对标量值进行平方运算，以便为滑块提供更好的曲线
+                    *((Float32 *) outData) *= *((Float32 *) outData);
+                    *((Float32 *) outData) = kVolume_MinDB + (*((Float32 *) outData) * (kVolume_MaxDB - kVolume_MinDB));
+
+                    // 报告写入了多少数据
+                    *outDataSize = sizeof(Float32);
+                    break;
+
+                case kAudioLevelControlPropertyDecibelRange:
+                    // 返回控制器的分贝范围
+                    FailWithAction(inDataSize < sizeof(AudioValueRange),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioLevelControlPropertyDecibelRange 返回值空间不足");
+                    ((AudioValueRange *) outData)->mMinimum = kVolume_MinDB;
+                    ((AudioValueRange *) outData)->mMaximum = kVolume_MaxDB;
+                    *outDataSize = sizeof(AudioValueRange);
+                    break;
+
+                case kAudioLevelControlPropertyConvertScalarToDecibels:
+                    // 将 outData 中的标量值转换为分贝
+                    FailWithAction(inDataSize < sizeof(Float32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioLevelControlPropertyDecibelValue 返回值空间不足");
+
+                    // 将值限制在 0 和 1 之间
+                    if (*((Float32 *) outData) < 0.0) {
+                        *((Float32 *) outData) = 0;
+                    }
+                    if (*((Float32 *) outData) > 1.0) {
+                        *((Float32 *) outData) = 1.0f;
+                    }
+
+                    // 注意在转换为分贝之前我们对标量值进行平方运算，以便为滑块提供更好的曲线
+                    *((Float32 *) outData) *= *((Float32 *) outData);
+                    *((Float32 *) outData) = kVolume_MinDB + (*((Float32 *) outData) * (kVolume_MaxDB - kVolume_MinDB));
+
+                    // 报告写入了多少数据
+                    *outDataSize = sizeof(Float32);
+                    break;
+
+                case kAudioLevelControlPropertyConvertDecibelsToScalar:
+                    // 将 outData 中的分贝值转换为标量
+                    FailWithAction(inDataSize < sizeof(Float32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 音量控制的 kAudioLevelControlPropertyDecibelValue 返回值空间不足");
+
+                    // 将值限制在 kVolume_MinDB 和 kVolume_MaxDB 之间
+                    if (*((Float32 *) outData) < kVolume_MinDB) {
+                        *((Float32 *) outData) = kVolume_MinDB;
+                    }
+                    if (*((Float32 *) outData) > kVolume_MaxDB) {
+                        *((Float32 *) outData) = kVolume_MaxDB;
+                    }
+
+                    // 注意在转换为分贝之前我们对标量值进行平方运算，以便为滑块提供更好的曲线。这里我们撤销该操作。
+                    *((Float32 *) outData) = *((Float32 *) outData) - kVolume_MinDB;
+                    *((Float32 *) outData) /= kVolume_MaxDB - kVolume_MinDB;
+                    *((Float32 *) outData) = sqrtf(*((Float32 *) outData));
+
+                    // 报告写入了多少数据
+                    *outDataSize = sizeof(Float32);
+                    break;
+
+                default:
+                    theAnswer = kAudioHardwareUnknownPropertyError;
+                    break;
+            }
+            break;
+
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+            switch (inAddress->mSelector) {
+                case kAudioObjectPropertyBaseClass:
+                    // kAudioMuteControlClassID 的基类是 kAudioBooleanControlClassID
+                    FailWithAction(inDataSize < sizeof(AudioClassID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 静音控制的 kAudioObjectPropertyBaseClass 返回值空间不足");
+                    *((AudioClassID *) outData) = kAudioBooleanControlClassID;
+                    *outDataSize = sizeof(AudioClassID);
+                    break;
+
+                case kAudioObjectPropertyClass:
+                    // 静音控制属于 kAudioMuteControlClassID 类
+                    FailWithAction(inDataSize < sizeof(AudioClassID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 静音控制的 kAudioObjectPropertyClass 返回值空间不足");
+                    *((AudioClassID *) outData) = kAudioMuteControlClassID;
+                    *outDataSize = sizeof(AudioClassID);
+                    break;
+
+                case kAudioObjectPropertyOwner:
+                    // 控制器的所有者是设备对象
+                    FailWithAction(inDataSize < sizeof(AudioObjectID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 静音控制的 kAudioObjectPropertyOwner 返回值空间不足");
+                    *((AudioObjectID *) outData) = kObjectID_Device;
+                    *outDataSize = sizeof(AudioObjectID);
+                    break;
+
+                case kAudioObjectPropertyOwnedObjects:
+                    // 控制器不拥有任何对象
+                    *outDataSize = 0 * sizeof(AudioObjectID);
+                    break;
+
+                case kAudioControlPropertyScope:
+                    // 此属性返回控制器所附加的范围
+                    FailWithAction(inDataSize < sizeof(AudioObjectPropertyScope),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 静音控制的 kAudioControlPropertyScope 返回值空间不足");
+                    *((AudioObjectPropertyScope *) outData) = (inObjectID == kObjectID_Mute_Input_Master) ?
+                                                              kAudioObjectPropertyScopeInput :
+                                                              kAudioObjectPropertyScopeOutput;
+                    *outDataSize = sizeof(AudioObjectPropertyScope);
+                    break;
+
+                case kAudioControlPropertyElement:
+                    // 此属性返回控制器所附加的元素
+                    FailWithAction(inDataSize < sizeof(AudioObjectPropertyElement),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 静音控制的 kAudioControlPropertyElement 返回值空间不足");
+                    *((AudioObjectPropertyElement *) outData) = kAudioObjectPropertyElementMain;
+                    *outDataSize = sizeof(AudioObjectPropertyElement);
+                    break;
+
+                case kAudioBooleanControlPropertyValue:
+                    // 返回静音控制的值，其中 0 表示静音关闭且可以听到音频，1 表示静音打开且无法听到音频。
+                    // 注意需要获取状态锁来检查此值。
+                    FailWithAction(inDataSize < sizeof(UInt32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 静音控制的 kAudioBooleanControlPropertyValue 返回值空间不足");
+
+                    pthread_mutex_lock(&gPlugIn_StateMutex);
+
+                    UInt32 muteValue;
+                    if (inObjectID == kObjectID_Mute_Input_Master) {
+                        muteValue = gMute_Input_Master_Value ? 1 : 0;
+                    } else {
+                        muteValue = gMute_Output_Master_Value ? 1 : 0;
+                    }
+                    *((UInt32 *) outData) = muteValue;
+
+                    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+                    *outDataSize = sizeof(UInt32);
+                    break;
+
+                default:
+                    theAnswer = kAudioHardwareUnknownPropertyError;
+                    break;
+            }
+            break;
+
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            switch (inAddress->mSelector) {
+                case kAudioObjectPropertyBaseClass:
+                    // kAudioDataSourceControlClassID 的基类是 kAudioSelectorControlClassID
+                    FailWithAction(inDataSize < sizeof(AudioClassID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioObjectPropertyBaseClass 返回值空间不足");
+                    *((AudioClassID *) outData) = kAudioSelectorControlClassID;
+                    *outDataSize = sizeof(AudioClassID);
+                    break;
+
+                case kAudioObjectPropertyClass:
+                    // 数据源控制属于 kAudioDataSourceControlClassID 类
+                    FailWithAction(inDataSize < sizeof(AudioClassID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioObjectPropertyClass 返回值空间不足");
+                    *((AudioClassID *) outData) = kAudioDataSourceControlClassID;
+                    switch (inObjectID) {
+                        case kObjectID_DataSource_Input_Master:
+                        case kObjectID_DataSource_Output_Master:
+                            *((AudioClassID *) outData) = kAudioDataSourceControlClassID;
+                            break;
+                        case kObjectID_DataDestination_PlayThru_Master:
+                            *((AudioClassID *) outData) = kAudioDataDestinationControlClassID;
+                            break;
+                    }
+                    *outDataSize = sizeof(AudioClassID);
+                    break;
+
+                case kAudioObjectPropertyOwner:
+                    // 控制器的所有者是设备对象
+                    FailWithAction(inDataSize < sizeof(AudioObjectID),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioObjectPropertyOwner 返回值空间不足");
+                    *((AudioObjectID *) outData) = kObjectID_Device;
+                    *outDataSize = sizeof(AudioObjectID);
+                    break;
+
+                case kAudioObjectPropertyOwnedObjects:
+                    // 控制器不拥有任何对象
+                    *outDataSize = 0 * sizeof(AudioObjectID);
+                    break;
+
+                case kAudioControlPropertyScope:
+                    // 此属性返回控制器所附加的范围
+                    FailWithAction(inDataSize < sizeof(AudioObjectPropertyScope),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioControlPropertyScope 返回值空间不足");
+                    switch (inObjectID) {
+                        case kObjectID_DataSource_Input_Master:
+                            *((AudioObjectPropertyScope *) outData) = kAudioObjectPropertyScopeInput;
+                            break;
+                        case kObjectID_DataSource_Output_Master:
+                            *((AudioObjectPropertyScope *) outData) = kAudioObjectPropertyScopeOutput;
+                            break;
+                        case kObjectID_DataDestination_PlayThru_Master:
+                            *((AudioObjectPropertyScope *) outData) = kAudioObjectPropertyScopePlayThrough;
+                            break;
+                    }
+                    *outDataSize = sizeof(AudioObjectPropertyScope);
+                    break;
+
+                case kAudioControlPropertyElement:
+                    // 此属性返回控制器所附加的元素
+                    FailWithAction(inDataSize < sizeof(AudioObjectPropertyElement),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioControlPropertyElement 返回值空间不足");
+                    *((AudioObjectPropertyElement *) outData) = kAudioObjectPropertyElementMain;
+                    *outDataSize = sizeof(AudioObjectPropertyElement);
+                    break;
+
+                case kAudioSelectorControlPropertyCurrentItem:
+                    // 返回数据源选择器的值
+                    // 注意需要获取状态锁来检查此值
+                    FailWithAction(inDataSize < sizeof(UInt32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioSelectorControlPropertyCurrentItem 返回值空间不足");
+                    pthread_mutex_lock(&gPlugIn_StateMutex);
+                    switch (inObjectID) {
+                        case kObjectID_DataSource_Input_Master:
+                            *((UInt32 *) outData) = gDataSource_Input_Master_Value;
+                            break;
+                        case kObjectID_DataSource_Output_Master:
+                            *((UInt32 *) outData) = gDataSource_Output_Master_Value;
+                            break;
+                        case kObjectID_DataDestination_PlayThru_Master:
+                            *((UInt32 *) outData) = gDataDestination_PlayThru_Master_Value;
+                            break;
+                    }
+                    pthread_mutex_unlock(&gPlugIn_StateMutex);
+                    *outDataSize = sizeof(UInt32);
+                    break;
+
+                case kAudioSelectorControlPropertyAvailableItems:
+                    // 返回数据源控制支持的所有项目的 ID
+                    // 计算请求的项目数量。注意此数量可以小于实际列表的大小，在这种情况下，只返回该数量的项目
+                    theNumberItemsToFetch = inDataSize / sizeof(UInt32);
+
+                    // 将其限制为我们拥有的项目数量
+                    if (theNumberItemsToFetch > kDataSource_NumberItems) {
+                        theNumberItemsToFetch = kDataSource_NumberItems;
+                    }
+
+                    // 填充返回数组
+                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
+                        ((UInt32 *) outData)[theItemIndex] = theItemIndex;
+                    }
+
+                    // 报告写入了多少数据
+                    *outDataSize = theNumberItemsToFetch * sizeof(UInt32);
+                    break;
+
+                case kAudioSelectorControlPropertyItemName:
+                    // 返回选择器项在限定符中的用户可读名称
+                    FailWithAction(inDataSize < sizeof(CFStringRef),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioSelectorControlPropertyItemName 返回值空间不足");
+                    FailWithAction(inQualifierDataSize != sizeof(UInt32),
+                                   theAnswer = kAudioHardwareBadPropertySizeError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioSelectorControlPropertyItemName 限定符大小错误");
+                    FailWithAction(*((const UInt32 *) inQualifierData) >= kDataSource_NumberItems,
+                                   theAnswer = kAudioHardwareIllegalOperationError,
+                                   Done,
+                                   "VirtualAudioDriver_GetControlPropertyData: 数据源控制的 kAudioSelectorControlPropertyItemName 限定符中的项无效");
+                    *((CFStringRef *) outData) = CFStringCreateWithFormat(NULL, NULL,
+                                                                          CFSTR(kDataSource_ItemNamePattern),
+                                                                          *((const UInt32 *) inQualifierData));
                     *outDataSize = sizeof(CFStringRef);
                     break;
 

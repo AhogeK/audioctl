@@ -21,31 +21,38 @@
 #if DEBUG
 #define DebugMsg(inFormat, ...) printf(inFormat "\n", ## __VA_ARGS__)
 #define FailIf(inCondition, inHandler, inMessage) \
-    if(inCondition) \
-    { \
-        DebugMsg(inMessage); \
-        goto inHandler; \
-    }
+    do { \
+        if(inCondition) { \
+            DebugMsg(inMessage); \
+            goto inHandler; \
+        } \
+    } while(0)
+
 #define FailWithAction(inCondition, inAction, inHandler, inMessage) \
-    if(inCondition) \
-    { \
-        DebugMsg(inMessage); \
-        { inAction; } \
-        goto inHandler; \
-    }
+    do { \
+        if(inCondition) { \
+            DebugMsg(inMessage); \
+            { inAction; } \
+            goto inHandler; \
+        } \
+    } while(0)
+
 #else
 #define DebugMsg(inFormat, ...)
 #define FailIf(inCondition, inHandler, inMessage) \
-    if(inCondition) \
-    { \
-        goto inHandler; \
-    }
+    do { \
+        if(inCondition) { \
+            goto inHandler; \
+        } \
+    } while(0)
+
 #define FailWithAction(inCondition, inAction, inHandler, inMessage) \
-    if(inCondition) \
-    { \
-        { inAction; } \
-        goto inHandler; \
-    }
+    do { \
+        if(inCondition) { \
+            { inAction; } \
+            goto inHandler; \
+        } \
+    } while(0)
 #endif
 
 #define kPlugIn_BundleID                "com.ahogek.VirtualAudioDriver"
@@ -230,5 +237,35 @@ VirtualAudioDriver_GetControlPropertyDataSize(AudioServerPlugInDriverRef inDrive
                                               pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress,
                                               UInt32 inQualifierDataSize, const void *inQualifierData,
                                               UInt32 *outDataSize);
+
+static OSStatus VirtualAudioDriver_GetPlugInPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                         UInt32 inDataSize, UInt32 *outDataSize, void *outData);
+
+static OSStatus VirtualAudioDriver_GetBoxPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                      pid_t inClientProcessID,
+                                                      const AudioObjectPropertyAddress *inAddress,
+                                                      UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                      UInt32 inDataSize, UInt32 *outDataSize, void *outData);
+
+static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                         UInt32 inDataSize, UInt32 *outDataSize, void *outData);
+
+static OSStatus VirtualAudioDriver_GetStreamPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                         UInt32 inDataSize, UInt32 *outDataSize, void *outData);
+
+static OSStatus VirtualAudioDriver_GetControlPropertyData(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                          pid_t inClientProcessID,
+                                                          const AudioObjectPropertyAddress *inAddress,
+                                                          UInt32 inQualifierDataSize, const void *inQualifierData,
+                                                          UInt32 inDataSize, UInt32 *outDataSize, void *outData);
 
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DRIVER_H
