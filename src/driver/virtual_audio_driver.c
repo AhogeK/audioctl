@@ -4292,3 +4292,62 @@ VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef inDriver, AudioObjectID inD
     Done:
     return theAnswer;
 }
+
+static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef inDriver,
+                                                    AudioObjectID inDeviceObjectID,
+                                                    UInt32 inClientID,
+                                                    Float64 *outSampleTime,
+                                                    UInt64 *outHostTime,
+                                                    UInt64 *outSeed) {
+    // 此方法返回设备的当前零时间戳。HAL 将设备的计时建模为一系列时间戳，这些时间戳将样本时间与主机时间相关联。
+    // 零时间戳的间隔使得样本时间的值相差 kAudioDevicePropertyZeroTimeStampPeriod。
+    // 这通常使用环形缓冲区来建模，当环形缓冲区包裹时更新零时间戳。
+    //
+    // 对于此设备，零时间戳的样本时间每次 kDevice_RingBufferSize 帧递增，主机时间递增 kDevice_RingBufferSize * gDevice_HostTicksPerFrame。
+
+#pragma unused(inClientID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    UInt64 theCurrentHostTime;
+    Float64 theHostTicksPerRingBuffer;
+    Float64 theHostTickOffset;
+    UInt64 theNextHostTime;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetZeroTimeStamp: 错误的驱动引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_GetZeroTimeStamp: 错误的设备 ID");
+
+    // 我们需要持有锁
+    pthread_mutex_lock(&gDevice_IOMutex);
+
+    // 获取当前主机时间
+    theCurrentHostTime = mach_absolute_time();
+
+    // 计算下一个主机时间
+    theHostTicksPerRingBuffer = gDevice_HostTicksPerFrame * ((Float64) kDevice_RingBufferSize);
+    theHostTickOffset = ((Float64) (gDevice_NumberTimeStamps + 1)) * theHostTicksPerRingBuffer;
+    theNextHostTime = gDevice_AnchorHostTime + ((UInt64) theHostTickOffset);
+
+    // 如果下一个主机时间小于当前时间，则进入下一个时间
+    if (theNextHostTime <= theCurrentHostTime) {
+        ++gDevice_NumberTimeStamps;
+    }
+
+    // 设置返回值
+    *outSampleTime = (Float64) (gDevice_NumberTimeStamps * kDevice_RingBufferSize);
+    *outHostTime = gDevice_AnchorHostTime + (UInt64) ((Float64) gDevice_NumberTimeStamps * theHostTicksPerRingBuffer);
+    *outSeed = 1;
+
+    // 解锁状态锁
+    pthread_mutex_unlock(&gDevice_IOMutex);
+
+    Done:
+    return theAnswer;
+}
