@@ -450,3 +450,358 @@ VirtualAudioDriver_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef inD
     Done:
     return theAnswer;
 }
+
+#pragma mark Property Operations
+
+static Boolean
+VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID, pid_t inClientProcessID,
+                               const AudioObjectPropertyAddress *inAddress) {
+    // 此方法返回给定对象是否具有指定属性
+
+    // 声明局部变量
+    Boolean theAnswer = false;
+
+    // 检查参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done,
+           "VirtualAudioDriver_HasProperty: 无效的驱动程序引用");
+    FailIf(inAddress == NULL, Done,
+           "VirtualAudioDriver_HasProperty: 地址为空");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inObjectID) {
+        case kObjectID_PlugIn:
+            theAnswer = VirtualAudioDriver_HasPlugInProperty(inDriver, inObjectID, inClientProcessID, inAddress);
+            break;
+
+        case kObjectID_Box:
+            theAnswer = VirtualAudioDriver_HasBoxProperty(inDriver, inObjectID, inClientProcessID, inAddress);
+            break;
+
+        case kObjectID_Device:
+            theAnswer = VirtualAudioDriver_HasDeviceProperty(inDriver, inObjectID, inClientProcessID, inAddress);
+            break;
+
+        case kObjectID_Stream_Input:
+        case kObjectID_Stream_Output:
+            theAnswer = VirtualAudioDriver_HasStreamProperty(inDriver, inObjectID, inClientProcessID, inAddress);
+            break;
+
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            theAnswer = VirtualAudioDriver_HasControlProperty(inDriver, inObjectID, inClientProcessID, inAddress);
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+#pragma mark PlugIn Property Operations
+
+static Boolean VirtualAudioDriver_HasPlugInProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                    pid_t inClientProcessID,
+                                                    const AudioObjectPropertyAddress *inAddress) {
+    // 此方法返回插件对象是否具有指定属性
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    Boolean theAnswer = false;
+
+    // 检查参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done,
+           "VirtualAudioDriver_HasPlugInProperty: 无效的驱动程序引用");
+    FailIf(inAddress == NULL, Done,
+           "VirtualAudioDriver_HasPlugInProperty: 地址为空");
+    FailIf(inObjectID != kObjectID_PlugIn, Done,
+           "VirtualAudioDriver_HasPlugInProperty: 不是插件对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetPlugInPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        case kAudioObjectPropertyBaseClass:        // 基类
+        case kAudioObjectPropertyClass:            // 类
+        case kAudioObjectPropertyOwner:            // 所有者
+        case kAudioObjectPropertyManufacturer:     // 制造商
+        case kAudioObjectPropertyOwnedObjects:     // 拥有的对象
+        case kAudioPlugInPropertyBoxList:          // 音频盒列表
+        case kAudioPlugInPropertyTranslateUIDToBox:    // UID转音频盒
+        case kAudioPlugInPropertyDeviceList:       // 设备列表
+        case kAudioPlugInPropertyTranslateUIDToDevice: // UID转设备
+        case kAudioPlugInPropertyResourceBundle:    // 资源包
+        case kAudioObjectPropertyCustomPropertyInfoList:    // 自定义属性信息列表
+        case kPlugIn_CustomPropertyID:             // 自定义属性ID
+            theAnswer = true;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+#pragma mark Box Property Operations
+
+static Boolean VirtualAudioDriver_HasBoxProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                 pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress) {
+    // 此方法返回音频盒对象是否具有指定属性
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    Boolean theAnswer = false;
+
+    // 检查参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done,
+           "VirtualAudioDriver_HasBoxProperty: 无效的驱动程序引用");
+    FailIf(inAddress == NULL, Done,
+           "VirtualAudioDriver_HasBoxProperty: 地址为空");
+    FailIf(inObjectID != kObjectID_Box, Done,
+           "VirtualAudioDriver_HasBoxProperty: 不是音频盒对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetBoxPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 基本对象属性
+        case kAudioObjectPropertyBaseClass:        // 基类
+        case kAudioObjectPropertyClass:            // 类
+        case kAudioObjectPropertyOwner:            // 所有者
+        case kAudioObjectPropertyName:             // 名称
+        case kAudioObjectPropertyModelName:        // 型号名称
+        case kAudioObjectPropertyManufacturer:     // 制造商
+        case kAudioObjectPropertyOwnedObjects:     // 拥有的对象
+        case kAudioObjectPropertyIdentify:         // 标识
+        case kAudioObjectPropertySerialNumber:     // 序列号
+        case kAudioObjectPropertyFirmwareVersion:  // 固件版本
+
+            // 音频盒特定属性
+        case kAudioBoxPropertyBoxUID:              // 音频盒UID
+        case kAudioBoxPropertyTransportType:       // 传输类型
+        case kAudioBoxPropertyHasAudio:            // 是否有音频
+        case kAudioBoxPropertyHasVideo:            // 是否有视频
+        case kAudioBoxPropertyHasMIDI:             // 是否有MIDI
+        case kAudioBoxPropertyIsProtected:         // 是否受保护
+        case kAudioBoxPropertyAcquired:            // 是否已获取
+        case kAudioBoxPropertyAcquisitionFailed:   // 获取是否失败
+        case kAudioBoxPropertyDeviceList:          // 设备列表
+            theAnswer = true;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+#pragma mark Device Property Operations
+
+static Boolean VirtualAudioDriver_HasDeviceProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                    pid_t inClientProcessID,
+                                                    const AudioObjectPropertyAddress *inAddress) {
+    // 此方法返回设备对象是否具有指定属性
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    Boolean theAnswer = false;
+
+    // 检查参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done,
+           "VirtualAudioDriver_HasDeviceProperty: 无效的驱动程序引用");
+    FailIf(inAddress == NULL, Done,
+           "VirtualAudioDriver_HasDeviceProperty: 地址为空");
+    FailIf(inObjectID != kObjectID_Device, Done,
+           "VirtualAudioDriver_HasDeviceProperty: 不是设备对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetDevicePropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 基本属性（不需要特殊条件的属性）
+        case kAudioObjectPropertyBaseClass:
+        case kAudioObjectPropertyClass:
+        case kAudioObjectPropertyOwner:
+        case kAudioObjectPropertyName:
+        case kAudioObjectPropertyManufacturer:
+        case kAudioObjectPropertyOwnedObjects:
+        case kAudioDevicePropertyDeviceUID:
+        case kAudioDevicePropertyModelUID:
+        case kAudioDevicePropertyTransportType:
+        case kAudioDevicePropertyRelatedDevices:
+        case kAudioDevicePropertyClockDomain:
+        case kAudioDevicePropertyDeviceIsAlive:
+        case kAudioDevicePropertyDeviceIsRunning:
+        case kAudioObjectPropertyControlList:
+        case kAudioDevicePropertyNominalSampleRate:
+        case kAudioDevicePropertyAvailableNominalSampleRates:
+        case kAudioDevicePropertyIsHidden:
+        case kAudioDevicePropertyZeroTimeStampPeriod:
+        case kAudioDevicePropertyIcon:
+        case kAudioDevicePropertyStreams:
+            theAnswer = true;
+            break;
+
+            // 需要检查作用域的属性（输入或输出）
+        case kAudioDevicePropertyDeviceCanBeDefaultDevice:
+        case kAudioDevicePropertyDeviceCanBeDefaultSystemDevice:
+        case kAudioDevicePropertyLatency:
+        case kAudioDevicePropertySafetyOffset:
+        case kAudioDevicePropertyPreferredChannelsForStereo:
+        case kAudioDevicePropertyPreferredChannelLayout:
+            theAnswer = (inAddress->mScope == kAudioObjectPropertyScopeInput) ||
+                        (inAddress->mScope == kAudioObjectPropertyScopeOutput);
+            break;
+
+            // 需要检查元素编号的属性
+        case kAudioObjectPropertyElementName:
+            theAnswer = inAddress->mElement <= 2;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+#pragma mark Stream Property Operations
+
+static Boolean VirtualAudioDriver_HasStreamProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                    pid_t inClientProcessID,
+                                                    const AudioObjectPropertyAddress *inAddress) {
+    // 此方法返回流对象是否具有指定属性
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    Boolean theAnswer = false;
+
+    // 检查参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done,
+           "VirtualAudioDriver_HasStreamProperty: 无效的驱动程序引用");
+    FailIf(inAddress == NULL, Done,
+           "VirtualAudioDriver_HasStreamProperty: 地址为空");
+    FailIf((inObjectID != kObjectID_Stream_Input) && (inObjectID != kObjectID_Stream_Output), Done,
+           "VirtualAudioDriver_HasStreamProperty: 不是流对象");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetStreamPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inAddress->mSelector) {
+        // 基本对象属性
+        case kAudioObjectPropertyBaseClass:
+        case kAudioObjectPropertyClass:
+        case kAudioObjectPropertyOwner:
+        case kAudioObjectPropertyOwnedObjects:
+        case kAudioObjectPropertyName:
+
+            // 流特定属性
+        case kAudioStreamPropertyIsActive:
+        case kAudioStreamPropertyDirection:
+        case kAudioStreamPropertyTerminalType:
+        case kAudioStreamPropertyStartingChannel:
+        case kAudioStreamPropertyLatency:
+        case kAudioStreamPropertyVirtualFormat:
+        case kAudioStreamPropertyPhysicalFormat:
+        case kAudioStreamPropertyAvailableVirtualFormats:
+        case kAudioStreamPropertyAvailablePhysicalFormats:
+            theAnswer = true;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+#pragma mark Control Property Operations
+
+static Boolean VirtualAudioDriver_HasControlProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                     pid_t inClientProcessID,
+                                                     const AudioObjectPropertyAddress *inAddress) {
+    // 此方法返回控制对象是否具有指定属性
+
+#pragma unused(inClientProcessID)
+
+    // 声明局部变量
+    Boolean theAnswer = false;
+
+    // 检查参数
+    FailIf(inDriver != gAudioServerPlugInDriverRef, Done,
+           "VirtualAudioDriver_HasControlProperty: 无效的驱动程序引用");
+    FailIf(inAddress == NULL, Done,
+           "VirtualAudioDriver_HasControlProperty: 地址为空");
+
+    // 注意：对于每个对象，此驱动程序实现了所有必需的属性，
+    // 以及一些有用但非必需的额外属性。
+    // 在 VirtualAudioDriver_GetControlPropertyData() 方法中有关于每个属性的更详细说明。
+    switch (inObjectID) {
+        // 音量控制
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+            switch (inAddress->mSelector) {
+                // 基本对象属性
+                case kAudioObjectPropertyBaseClass:
+                case kAudioObjectPropertyClass:
+                case kAudioObjectPropertyOwner:
+                case kAudioObjectPropertyOwnedObjects:
+                case kAudioControlPropertyScope:
+                case kAudioControlPropertyElement:
+                    // 音量控制特定属性
+                case kAudioLevelControlPropertyScalarValue:
+                case kAudioLevelControlPropertyDecibelValue:
+                case kAudioLevelControlPropertyDecibelRange:
+                case kAudioLevelControlPropertyConvertScalarToDecibels:
+                case kAudioLevelControlPropertyConvertDecibelsToScalar:
+                    theAnswer = true;
+                    break;
+            }
+            break;
+
+            // 静音控制
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+            switch (inAddress->mSelector) {
+                // 基本对象属性
+                case kAudioObjectPropertyBaseClass:
+                case kAudioObjectPropertyClass:
+                case kAudioObjectPropertyOwner:
+                case kAudioObjectPropertyOwnedObjects:
+                case kAudioControlPropertyScope:
+                case kAudioControlPropertyElement:
+                    // 静音控制特定属性
+                case kAudioBooleanControlPropertyValue:
+                    theAnswer = true;
+                    break;
+            }
+            break;
+
+            // 数据源/目标控制
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            switch (inAddress->mSelector) {
+                // 基本对象属性
+                case kAudioObjectPropertyBaseClass:
+                case kAudioObjectPropertyClass:
+                case kAudioObjectPropertyOwner:
+                case kAudioObjectPropertyOwnedObjects:
+                case kAudioControlPropertyScope:
+                case kAudioControlPropertyElement:
+                    // 选择器控制特定属性
+                case kAudioSelectorControlPropertyCurrentItem:
+                case kAudioSelectorControlPropertyAvailableItems:
+                case kAudioSelectorControlPropertyItemName:
+                    theAnswer = true;
+                    break;
+            }
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}

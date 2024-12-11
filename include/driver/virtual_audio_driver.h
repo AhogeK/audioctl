@@ -156,4 +156,24 @@ static OSStatus VirtualAudioDriver_EndIOOperation(AudioServerPlugInDriverRef inD
                                                   const AudioServerPlugInIOCycleInfo *inIOCycleInfo);
 
 
+// 属性操作辅助函数声明
+static Boolean VirtualAudioDriver_HasPlugInProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                    pid_t inClientProcessID,
+                                                    const AudioObjectPropertyAddress *inAddress);
+
+static Boolean VirtualAudioDriver_HasBoxProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                 pid_t inClientProcessID, const AudioObjectPropertyAddress *inAddress);
+
+static Boolean VirtualAudioDriver_HasDeviceProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                    pid_t inClientProcessID,
+                                                    const AudioObjectPropertyAddress *inAddress);
+
+static Boolean VirtualAudioDriver_HasStreamProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                    pid_t inClientProcessID,
+                                                    const AudioObjectPropertyAddress *inAddress);
+
+static Boolean VirtualAudioDriver_HasControlProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
+                                                     pid_t inClientProcessID,
+                                                     const AudioObjectPropertyAddress *inAddress);
+
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DRIVER_H
