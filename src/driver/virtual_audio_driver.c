@@ -277,3 +277,22 @@ static OSStatus VirtualAudioDriver_CreateDevice(AudioServerPlugInDriverRef inDri
     Done:
     return theAnswer;
 }
+
+static OSStatus VirtualAudioDriver_DestroyDevice(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID) {
+    // 此方法用于告诉实现传输管理器语义的驱动程序销毁 AudioEndpointDevice。
+    // 由于此驱动程序不是传输管理器，我们只需检查参数并返回 kAudioHardwareUnsupportedOperationError。
+
+#pragma unused(inDeviceObjectID)
+
+    // 声明局部变量
+    OSStatus theAnswer = kAudioHardwareUnsupportedOperationError;
+
+    // 检查参数
+    if (inDriver != gAudioServerPlugInDriverRef) {
+        theAnswer = kAudioHardwareBadObjectError;
+        goto Done;
+    }
+
+    Done:
+    return theAnswer;
+}
