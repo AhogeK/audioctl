@@ -381,3 +381,49 @@ VirtualAudioDriver_RemoveDeviceClient(AudioServerPlugInDriverRef inDriver, Audio
     Done:
     return theAnswer;
 }
+
+static OSStatus
+VirtualAudioDriver_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID,
+                                                    UInt64 inChangeAction, void *inChangeInfo) {
+    // 此方法在设备可以执行通过 RequestDeviceConfigurationChange() 请求的配置更改时被调用。
+    // 参数 inChangeAction 和 inChangeInfo 与传递给 RequestDeviceConfigurationChange() 的参数相同。
+    //
+    // HAL 保证在此方法执行期间 IO 将被停止。HAL 还会处理非控制相关属性的具体变化。
+    // 这意味着只需要为 HAL 不知道的自定义属性或控制发送通知。
+    //
+    // 对于此驱动程序实现的设备，只有采样率更改需要通过此过程，
+    // 因为它是设备中唯一可以更改的非控制状态。对于此更改，新的采样率通过 inChangeAction 参数传入。
+
+#pragma unused(inChangeInfo)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_PerformDeviceConfigurationChange: 无效的驱动程序引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_PerformDeviceConfigurationChange: 无效的设备对象ID");
+    FailWithAction((inChangeAction != 44100) && (inChangeAction != 48000), theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_PerformDeviceConfigurationChange: 无效的采样率");
+
+    // 锁定状态互斥锁
+    pthread_mutex_lock(&gPlugIn_StateMutex);
+
+    // 更改采样率（使用显式类型转换）
+    gDevice_SampleRate = (Float64) (inChangeAction);
+
+    // 重新计算依赖于采样率的状态
+    struct mach_timebase_info theTimeBaseInfo;
+    mach_timebase_info(&theTimeBaseInfo);
+    Float64 theHostClockFrequency = (Float64) theTimeBaseInfo.denom / (Float64) theTimeBaseInfo.numer;
+    theHostClockFrequency *= 1000000000.0;
+    gDevice_HostTicksPerFrame = theHostClockFrequency / gDevice_SampleRate;
+
+    // 解锁状态互斥锁
+    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+    Done:
+    return theAnswer;
+}
