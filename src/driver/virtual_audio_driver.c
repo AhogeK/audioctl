@@ -4474,3 +4474,30 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef inDr
     Done:
     return theAnswer;
 }
+
+static OSStatus VirtualAudioDriver_EndIOOperation(AudioServerPlugInDriverRef inDriver,
+                                                  AudioObjectID inDeviceObjectID,
+                                                  UInt32 inClientID,
+                                                  UInt32 inOperationID,
+                                                  UInt32 inIOBufferFrameSize,
+                                                  const AudioServerPlugInIOCycleInfo *inIOCycleInfo) {
+    // 这是在 IO 操作结束时调用的。此设备不执行任何操作，因此只需检查参数并返回。
+
+#pragma unused(inClientID, inOperationID, inIOBufferFrameSize, inIOCycleInfo)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_EndIOOperation: 错误的驱动引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_EndIOOperation: 错误的设备 ID");
+
+    Done:
+    return theAnswer;
+}
