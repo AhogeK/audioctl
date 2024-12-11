@@ -360,3 +360,24 @@ static OSStatus VirtualAudioDriver_AddDeviceClient(AudioServerPlugInDriverRef in
     Done:
     return theAnswer;
 }
+
+static OSStatus
+VirtualAudioDriver_RemoveDeviceClient(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID,
+                                      const AudioServerPlugInClientInfo *inClientInfo) {
+    // 此方法用于通知驱动程序某个客户端不再使用指定的设备。
+    // 由于此驱动程序不需要跟踪客户端，因此只需检查参数并成功返回。
+
+#pragma unused(inClientInfo)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_RemoveDeviceClient: 无效的驱动程序引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_RemoveDeviceClient: 无效的设备对象ID");
+
+    Done:
+    return theAnswer;
+}
