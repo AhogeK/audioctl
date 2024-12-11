@@ -49,10 +49,10 @@
 #endif
 
 #define kPlugIn_BundleID                "com.ahogek.VirtualAudioDriver"
-#define    kBox_UID                        "C604CE03-358B-4903-B7B3-45FEC49B689E"
-#define kDevice_UID                        "0E1D42AE-F2ED-4A48-9624-C770025E32A4"
+#define kBox_UID                        "C604CE03-358B-4903-B7B3-45FEC49B689E"
+#define kDevice_UID                     "0E1D42AE-F2ED-4A48-9624-C770025E32A4"
 #define kDevice_ModelUID                "56304703-6894-4B97-94A3-B7A551D35150"
-#define    kDataSource_ItemNamePattern     "Data Source Item %d"
+#define kDataSource_ItemNamePattern     "Data Source Item %d"
 
 // 基本的驱动接口结构体声明
 extern AudioServerPlugInDriverInterface gAudioServerPlugInDriverInterface;

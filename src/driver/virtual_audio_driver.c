@@ -427,3 +427,26 @@ VirtualAudioDriver_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef i
     Done:
     return theAnswer;
 }
+
+static OSStatus
+VirtualAudioDriver_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID,
+                                                  UInt64 inChangeAction, void *inChangeInfo) {
+    // 此方法用于通知驱动程序配置更改请求被拒绝。
+    // 这为驱动程序提供了清理与请求相关状态的机会。
+    // 对于此驱动程序，取消的配置更改不需要任何操作。
+    // 因此，我们只需检查参数并返回。
+
+#pragma unused(inChangeAction, inChangeInfo)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_AbortDeviceConfigurationChange: 无效的驱动程序引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device, theAnswer = kAudioHardwareBadObjectError, Done,
+                   "VirtualAudioDriver_AbortDeviceConfigurationChange: 无效的设备对象ID");
+
+    Done:
+    return theAnswer;
+}
