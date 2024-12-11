@@ -4351,3 +4351,59 @@ static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef i
     Done:
     return theAnswer;
 }
+
+static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef inDriver,
+                                                     AudioObjectID inDeviceObjectID,
+                                                     UInt32 inClientID,
+                                                     UInt32 inOperationID,
+                                                     Boolean *outWillDo,
+                                                     Boolean *outWillDoInPlace) {
+    // 此方法返回设备是否将执行给定的 IO 操作。
+    // 对于此设备，我们仅支持读取输入数据和写入输出数据。
+
+#pragma unused(inClientID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_WillDoIOOperation: 错误的驱动引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_WillDoIOOperation: 错误的设备 ID");
+
+    // 确定我们是否支持该操作
+    bool willDo = false;
+    bool willDoInPlace = true;
+
+    // 处理不同的 IO 操作ID
+    switch (inOperationID) {
+        case kAudioServerPlugInIOOperationReadInput:
+        case kAudioServerPlugInIOOperationWriteMix:
+            // 对于读取输入和写入混音操作，设备都支持
+            willDo = true;
+            willDoInPlace = true;
+            break;
+
+        default:
+            // 针对未处理的操作ID，默认不支持
+            willDo = false;
+            willDoInPlace = false;
+            break;
+    }
+
+    // 填写返回值
+    if (outWillDo != NULL) {
+        *outWillDo = willDo;
+    }
+    if (outWillDoInPlace != NULL) {
+        *outWillDoInPlace = willDoInPlace;
+    }
+
+    Done:
+    return theAnswer;
+}
