@@ -5,7 +5,8 @@
 #include "driver/virtual_audio_driver.h"
 #include <stdatomic.h>
 #include <pthread.h>
-#include "mach/mach_time.h"
+#include <mach/mach_time.h>
+#include <sys/syslog.h>
 
 //==================================================================================================
 #pragma mark -
@@ -727,6 +728,121 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef in
     return theAnswer;
 }
 
+static OSStatus VirtualAudioDriver_SetPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                   AudioObjectID inObjectID,
+                                                   pid_t inClientProcessID,
+                                                   const AudioObjectPropertyAddress *inAddress,
+                                                   UInt32 inQualifierDataSize,
+                                                   const void *inQualifierData,
+                                                   UInt32 inDataSize,
+                                                   const void *inData) {
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    UInt32 theNumberPropertiesChanged = 0;
+    AudioObjectPropertyAddress theChangedAddresses[2];
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetPropertyData: 地址为空");
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    // 在 VirtualAudioDriver_GetPropertyData() 方法中有关于每个属性的更详细的注释。
+    switch (inObjectID) {
+        case kObjectID_PlugIn:
+            theAnswer = VirtualAudioDriver_SetPlugInPropertyData(inDriver,
+                                                                 inObjectID,
+                                                                 inClientProcessID,
+                                                                 inAddress,
+                                                                 inQualifierDataSize,
+                                                                 inQualifierData,
+                                                                 inDataSize,
+                                                                 inData,
+                                                                 &theNumberPropertiesChanged,
+                                                                 theChangedAddresses);
+            break;
+
+        case kObjectID_Box:
+            theAnswer = VirtualAudioDriver_SetBoxPropertyData(inDriver,
+                                                              inObjectID,
+                                                              inClientProcessID,
+                                                              inAddress,
+                                                              inQualifierDataSize,
+                                                              inQualifierData,
+                                                              inDataSize,
+                                                              inData,
+                                                              &theNumberPropertiesChanged,
+                                                              theChangedAddresses);
+            break;
+
+        case kObjectID_Device:
+            theAnswer = VirtualAudioDriver_SetDevicePropertyData(inDriver,
+                                                                 inObjectID,
+                                                                 inClientProcessID,
+                                                                 inAddress,
+                                                                 inQualifierDataSize,
+                                                                 inQualifierData,
+                                                                 inDataSize,
+                                                                 inData,
+                                                                 &theNumberPropertiesChanged,
+                                                                 theChangedAddresses);
+            break;
+
+        case kObjectID_Stream_Input:
+        case kObjectID_Stream_Output:
+            theAnswer = VirtualAudioDriver_SetStreamPropertyData(inDriver,
+                                                                 inObjectID,
+                                                                 inClientProcessID,
+                                                                 inAddress,
+                                                                 inQualifierDataSize,
+                                                                 inQualifierData,
+                                                                 inDataSize,
+                                                                 inData,
+                                                                 &theNumberPropertiesChanged,
+                                                                 theChangedAddresses);
+            break;
+
+        case kObjectID_Volume_Input_Master:
+        case kObjectID_Volume_Output_Master:
+        case kObjectID_Mute_Input_Master:
+        case kObjectID_Mute_Output_Master:
+        case kObjectID_DataSource_Input_Master:
+        case kObjectID_DataSource_Output_Master:
+        case kObjectID_DataDestination_PlayThru_Master:
+            theAnswer = VirtualAudioDriver_SetControlPropertyData(inDriver,
+                                                                  inObjectID,
+                                                                  inClientProcessID,
+                                                                  inAddress,
+                                                                  inQualifierDataSize,
+                                                                  inQualifierData,
+                                                                  inDataSize,
+                                                                  inData,
+                                                                  &theNumberPropertiesChanged,
+                                                                  theChangedAddresses);
+            break;
+
+        default:
+            theAnswer = kAudioHardwareBadObjectError;
+            break;
+    };
+
+    // 发送任何通知
+    if (theNumberPropertiesChanged > 0) {
+        gPlugIn_Host->PropertiesChanged(gPlugIn_Host,
+                                        inObjectID,
+                                        theNumberPropertiesChanged,
+                                        theChangedAddresses);
+    }
+
+    Done:
+    return theAnswer;
+}
+
 #pragma mark PlugIn Property Operations
 
 static Boolean VirtualAudioDriver_HasPlugInProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
@@ -1093,7 +1209,9 @@ static OSStatus VirtualAudioDriver_GetPlugInPropertyData(AudioServerPlugInDriver
                            "VirtualAudioDriver_GetPlugInPropertyData: kPlugIn_CustomPropertyID 没有限定符");
 
             DebugMsg("VirtualAudioDriver_GetPlugInPropertyData: 传递给我们的限定符是:");
-            CFShow(*((CFPropertyListRef *) inQualifierData));
+            const CFPropertyListRef qualifierData = *((const CFPropertyListRef *) inQualifierData);
+            CFShow(qualifierData);
+
             *((CFStringRef *) outData) = CFSTR("Virtual Audio Driver Custom Property");
             *outDataSize = sizeof(CFStringRef);
             break;
@@ -1102,6 +1220,77 @@ static OSStatus VirtualAudioDriver_GetPlugInPropertyData(AudioServerPlugInDriver
             theAnswer = kAudioHardwareUnknownPropertyError;
             break;
     }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_SetPlugInPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         const void *inData,
+                                                         UInt32 *outNumberPropertiesChanged,
+                                                         const AudioObjectPropertyAddress *outChangedAddresses) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData, inDataSize, inData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetPlugInPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetPlugInPropertyData: 地址为空");
+    FailWithAction(outNumberPropertiesChanged == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetPlugInPropertyData: 没有地方返回更改的属性数量");
+    FailWithAction(outChangedAddresses == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetPlugInPropertyData: 没有地方返回更改的属性");
+    FailWithAction(inObjectID != kObjectID_PlugIn,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetPlugInPropertyData: 不是插件对象");
+
+    // 初始化返回的更改属性数量
+    *outNumberPropertiesChanged = 0;
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    // 在 VirtualAudioDriver_GetPlugInPropertyData() 方法中有关于每个属性的更详细的注释。
+    switch (inAddress->mSelector) {
+        case kPlugIn_CustomPropertyID:
+            FailWithAction(inDataSize != sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetPlugInPropertyData: kPlugIn_CustomPropertyID 的返回值空间不足");
+            FailWithAction(inQualifierDataSize != sizeof(CFPropertyListRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetPlugInPropertyData: kPlugIn_CustomPropertyID 的限定符大小错误");
+            FailWithAction(inQualifierData == NULL,
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetPlugInPropertyData: kPlugIn_CustomPropertyID 无限定符");
+            DebugMsg("VirtualAudioDriver_SetPlugInPropertyData: 传递给我们的限定符是:");
+            CFShow(*((CFPropertyListRef *) inQualifierData));
+            DebugMsg("VirtualAudioDriver_SetPlugInPropertyData: 传递给我们的数据是:");
+            CFShow(*((CFStringRef *) inData));
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    };
 
     Done:
     return theAnswer;
@@ -1488,6 +1677,146 @@ static OSStatus VirtualAudioDriver_GetBoxPropertyData(AudioServerPlugInDriverRef
                 *outDataSize = 0;
             }
             pthread_mutex_unlock(&gPlugIn_StateMutex);
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_SetBoxPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                      AudioObjectID inObjectID,
+                                                      pid_t inClientProcessID,
+                                                      const AudioObjectPropertyAddress *inAddress,
+                                                      UInt32 inQualifierDataSize,
+                                                      const void *inQualifierData,
+                                                      UInt32 inDataSize,
+                                                      const void *inData,
+                                                      UInt32 *outNumberPropertiesChanged,
+                                                      AudioObjectPropertyAddress outChangedAddresses[2]) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData, inDataSize, inData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetBoxPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetBoxPropertyData: 地址为空");
+    FailWithAction(outNumberPropertiesChanged == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetBoxPropertyData: 没有地方返回更改的属性数量");
+    FailWithAction(outChangedAddresses == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetBoxPropertyData: 没有地方返回更改的属性");
+    FailWithAction(inObjectID != kObjectID_Box,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetBoxPropertyData: 不是盒子对象");
+
+    // 初始化返回的更改属性数量
+    *outNumberPropertiesChanged = 0;
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    // 在 VirtualAudioDriver_GetPlugInPropertyData() 方法中有关于每个属性的更详细的注释。
+    switch (inAddress->mSelector) {
+        case kAudioObjectPropertyName:
+            // 盒子应允许其名称可编辑
+        {
+            FailWithAction(inDataSize != sizeof(CFStringRef),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetBoxPropertyData: kAudioObjectPropertyName 的数据大小错误");
+            FailWithAction(inData == NULL,
+                           theAnswer = kAudioHardwareIllegalOperationError,
+                           Done,
+                           "VirtualAudioDriver_SetBoxPropertyData: 没有数据设置为 kAudioObjectPropertyName");
+
+            // 使用 const 来避免丢失 const 限定符
+            const CFStringRef *theNewName = (const CFStringRef *) inData;
+
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            if ((theNewName != NULL) && (*theNewName != NULL)) {
+                CFRetain(*theNewName);
+            }
+            if (gBox_Name != NULL) {
+                CFRelease(gBox_Name);
+            }
+            gBox_Name = *theNewName;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+            *outNumberPropertiesChanged = 1;
+            outChangedAddresses[0].mSelector = kAudioObjectPropertyName;
+            outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+            outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+        }
+            break;
+
+        case kAudioObjectPropertyIdentify:
+            // 由于我们没有任何实际的硬件闪烁，我们将为此属性安排一个通知以进行测试。
+            // 请注意，真正的实现应该仅在硬件希望应用程序为设备闪烁其 UI 时发送通知。
+        {
+            syslog(LOG_NOTICE, "The identify property has been set on the Box implemented by the VirtualAudio driver.");
+            FailWithAction(inDataSize != sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetBoxPropertyData: kAudioObjectPropertyIdentify 的数据大小错误");
+            dispatch_after(dispatch_time(0, 2ULL * 1000ULL * 1000ULL * 1000ULL),
+                           dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                        AudioObjectPropertyAddress theAddress = {kAudioObjectPropertyIdentify,
+                                                                 kAudioObjectPropertyScopeGlobal,
+                                                                 kAudioObjectPropertyElementMain};
+                        gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_Box, 1, &theAddress);
+                    });
+        }
+            break;
+
+        case kAudioBoxPropertyAcquired:
+            // 当盒子被获取时，意味着其内容（即设备）对系统可用
+        {
+            FailWithAction(inDataSize != sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetBoxPropertyData: kAudioBoxPropertyAcquired 的数据大小错误");
+
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            const UInt32 *newValue = (const UInt32 *) inData;
+            if (gBox_Acquired != (*newValue != 0)) {
+                // 新值不同于旧值，因此保存它
+                gBox_Acquired = *newValue != 0;
+                gPlugIn_Host->WriteToStorage(gPlugIn_Host, CFSTR("box acquired"),
+                                             gBox_Acquired ? kCFBooleanTrue : kCFBooleanFalse);
+
+                // 这意味着该属性和设备列表属性已更改
+                *outNumberPropertiesChanged = 2;
+                outChangedAddresses[0].mSelector = kAudioBoxPropertyAcquired;
+                outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+                outChangedAddresses[1].mSelector = kAudioBoxPropertyDeviceList;
+                outChangedAddresses[1].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[1].mElement = kAudioObjectPropertyElementMain;
+
+                // 这也意味着插件的设备列表已更改
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    AudioObjectPropertyAddress theAddress = {kAudioPlugInPropertyDeviceList,
+                                                             kAudioObjectPropertyScopeGlobal,
+                                                             kAudioObjectPropertyElementMain};
+                    gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_PlugIn, 1, &theAddress);
+                });
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+        }
             break;
 
         default:
@@ -2246,6 +2575,94 @@ static OSStatus VirtualAudioDriver_GetDevicePropertyData(AudioServerPlugInDriver
     return theAnswer;
 }
 
+static OSStatus VirtualAudioDriver_SetDevicePropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         const void *inData,
+                                                         UInt32 *outNumberPropertiesChanged,
+                                                         AudioObjectPropertyAddress outChangedAddresses[2]) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    Float64 theOldSampleRate;
+    UInt64 theNewSampleRate;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetDevicePropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetDevicePropertyData: 地址为空");
+    FailWithAction(outNumberPropertiesChanged == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetDevicePropertyData: 没有地方返回更改的属性数量");
+    FailWithAction(outChangedAddresses == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetDevicePropertyData: 没有地方返回更改的属性");
+    FailWithAction(inObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetDevicePropertyData: 不是设备对象");
+
+    // 初始化返回的更改属性数量
+    *outNumberPropertiesChanged = 0;
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    // 在 VirtualAudioDriver_GetDevicePropertyData() 方法中有关于每个属性的更详细的注释。
+    switch (inAddress->mSelector) {
+        case kAudioDevicePropertyNominalSampleRate:
+            // 更改采样率需要通过 RequestConfigChange/PerformConfigChange 机制处理。
+
+            // 检查参数
+            FailWithAction(inDataSize != sizeof(Float64),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetDevicePropertyData: kAudioDevicePropertyNominalSampleRate 的数据大小错误");
+            FailWithAction((*((const Float64 *) inData) != 44100.0) && (*((const Float64 *) inData) != 48000.0),
+                           theAnswer = kAudioHardwareIllegalOperationError,
+                           Done,
+                           "VirtualAudioDriver_SetDevicePropertyData: 不支持的 kAudioDevicePropertyNominalSampleRate 值");
+
+            // 确保新值与旧值不同
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            theOldSampleRate = gDevice_SampleRate;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+            if (*((const Float64 *) inData) != theOldSampleRate) {
+                *outNumberPropertiesChanged = 1;
+                outChangedAddresses[0].mSelector = kAudioDevicePropertyNominalSampleRate;
+                outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+
+                // 异步调度更改
+                theOldSampleRate = *((const Float64 *) inData);
+                theNewSampleRate = (UInt64) theOldSampleRate;
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    gPlugIn_Host->RequestDeviceConfigurationChange(gPlugIn_Host, kObjectID_Device, theNewSampleRate,
+                                                                   NULL);
+                });
+            }
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    return theAnswer;
+}
+
 #pragma mark Stream Property Operations
 
 static Boolean VirtualAudioDriver_HasStreamProperty(AudioServerPlugInDriverRef inDriver, AudioObjectID inObjectID,
@@ -2641,6 +3058,147 @@ static OSStatus VirtualAudioDriver_GetStreamPropertyData(AudioServerPlugInDriver
             theAnswer = kAudioHardwareUnknownPropertyError;
             break;
     };
+
+    Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_SetStreamPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         const void *inData,
+                                                         UInt32 *outNumberPropertiesChanged,
+                                                         AudioObjectPropertyAddress outChangedAddresses[2]) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+    Float64 theOldSampleRate;
+    UInt64 theNewSampleRate;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetStreamPropertyData: 错误的驱动引用");
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetStreamPropertyData: 地址为空");
+    FailWithAction(outNumberPropertiesChanged == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetStreamPropertyData: 没有地方返回更改的属性数量");
+    FailWithAction(outChangedAddresses == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetStreamPropertyData: 没有地方返回更改的属性");
+    FailWithAction((inObjectID != kObjectID_Stream_Input) && (inObjectID != kObjectID_Stream_Output),
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetStreamPropertyData: 不是流对象");
+
+    // 初始化返回的更改属性数量
+    *outNumberPropertiesChanged = 0;
+
+    // 注意，对于每个对象，此驱动程序实现了所有必需的属性以及一些有用但不是必需的额外属性。
+    // 在 VirtualAudioDriver_GetStreamPropertyData() 方法中有关于每个属性的更详细的注释。
+    switch (inAddress->mSelector) {
+        case kAudioStreamPropertyIsActive:
+            // 更改流的活动状态不会影响IO或更改结构，因此我们可以只保存状态并发送通知。
+            FailWithAction(inDataSize != sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyIsActive 的数据大小错误");
+
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            if (inObjectID == kObjectID_Stream_Input) {
+                if (gStream_Input_IsActive != (*((const UInt32 *) inData) != 0)) {
+                    gStream_Input_IsActive = *((const UInt32 *) inData) != 0;
+                    *outNumberPropertiesChanged = 1;
+                    outChangedAddresses[0].mSelector = kAudioStreamPropertyIsActive;
+                    outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                    outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+                }
+            } else {
+                if (gStream_Output_IsActive != (*((const UInt32 *) inData) != 0)) {
+                    gStream_Output_IsActive = *((const UInt32 *) inData) != 0;
+                    *outNumberPropertiesChanged = 1;
+                    outChangedAddresses[0].mSelector = kAudioStreamPropertyIsActive;
+                    outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                    outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+                }
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            break;
+
+        case kAudioStreamPropertyVirtualFormat:
+        case kAudioStreamPropertyPhysicalFormat:
+            // 更改流格式需要通过 RequestConfigChange/PerformConfigChange 机制处理。
+            // 请注意，由于此设备仅支持2通道32位浮点数据，因此唯一可以更改的是采样率。
+            FailWithAction(inDataSize != sizeof(AudioStreamBasicDescription),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的数据大小错误");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mFormatID != kAudioFormatLinearPCM,
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的格式ID不支持");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mFormatFlags !=
+                           (kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked),
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的格式标志不支持");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mBytesPerPacket != 8,
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的每个包字节数不支持");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mFramesPerPacket != 1,
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的每个包帧数不支持");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mBytesPerFrame != 8,
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的每帧字节数不支持");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mChannelsPerFrame != 2,
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的每帧通道数不支持");
+            FailWithAction(((const AudioStreamBasicDescription *) inData)->mBitsPerChannel != 32,
+                           theAnswer = kAudioDeviceUnsupportedFormatError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的每通道位数不支持");
+            FailWithAction((((const AudioStreamBasicDescription *) inData)->mSampleRate != 44100.0) &&
+                           (((const AudioStreamBasicDescription *) inData)->mSampleRate != 48000.0),
+                           theAnswer = kAudioHardwareIllegalOperationError,
+                           Done,
+                           "VirtualAudioDriver_SetStreamPropertyData: kAudioStreamPropertyPhysicalFormat 的采样率不支持");
+
+            // 如果我们能走到这一步，说明请求的格式是我们支持的，所以确保采样率实际上是不同的
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            theOldSampleRate = gDevice_SampleRate;
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+            if (((const AudioStreamBasicDescription *) inData)->mSampleRate != theOldSampleRate) {
+                // 异步调度更改
+                theOldSampleRate = ((const AudioStreamBasicDescription *) inData)->mSampleRate;
+                theNewSampleRate = (UInt64) theOldSampleRate;
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                    gPlugIn_Host->RequestDeviceConfigurationChange(gPlugIn_Host, kObjectID_Device, theNewSampleRate,
+                                                                   NULL);
+                });
+            }
+            break;
+
+        default:
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
 
     Done:
     return theAnswer;
@@ -3405,7 +3963,8 @@ static OSStatus VirtualAudioDriver_GetControlPropertyData(AudioServerPlugInDrive
                     }
 
                     // 填充返回数组
-                    for (theItemIndex = 0; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
+                    theItemIndex = 0; // 确保初始化
+                    for (; theItemIndex < theNumberItemsToFetch; ++theItemIndex) {
                         ((UInt32 *) outData)[theItemIndex] = theItemIndex;
                     }
 
@@ -3445,5 +4004,202 @@ static OSStatus VirtualAudioDriver_GetControlPropertyData(AudioServerPlugInDrive
     }
 
     Done:
+    return theAnswer;
+}
+
+static OSStatus VirtualAudioDriver_SetControlPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                          AudioObjectID inObjectID,
+                                                          pid_t inClientProcessID,
+                                                          const AudioObjectPropertyAddress *inAddress,
+                                                          UInt32 inQualifierDataSize,
+                                                          const void *inQualifierData,
+                                                          UInt32 inDataSize,
+                                                          const void *inData,
+                                                          UInt32 *outNumberPropertiesChanged,
+                                                          AudioObjectPropertyAddress outChangedAddresses[2]) {
+#pragma unused(inClientProcessID, inQualifierDataSize, inQualifierData)
+
+    // 声明局部变量，用于存储操作结果和临时数据
+    OSStatus theAnswer = 0;
+    Float32 theNewVolume;
+    // 声明指针用于追踪当前要操作的控制值
+    bool *currentMuteValue = NULL;          // 用于追踪静音状态
+    Float32 *currentVolumeValue = NULL;        // 用于追踪音量值
+    UInt32 *currentDataSourceValue = NULL;     // 用于追踪数据源选择
+
+    // 验证输入参数的有效性
+    // 检查驱动引用是否正确
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_SetControlPropertyData: 错误的驱动引用");
+    // 检查属性地址是否有效
+    FailWithAction(inAddress == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetControlPropertyData: 地址为空");
+    // 确保有地方存储更改的属性数量
+    FailWithAction(outNumberPropertiesChanged == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetControlPropertyData: 没有地方返回更改的属性数量");
+    // 确保有地方存储更改的属性地址
+    FailWithAction(outChangedAddresses == NULL,
+                   theAnswer = kAudioHardwareIllegalOperationError,
+                   Done,
+                   "VirtualAudioDriver_SetControlPropertyData: 没有地方返回更改的属性");
+
+    // 初始化返回的更改属性数量为0
+    *outNumberPropertiesChanged = 0;
+
+    // 根据对象ID确定要操作的具体控制值
+    // 这个switch语句将正确的全局变量地址分配给相应的指针
+    switch (inObjectID) {
+        case kObjectID_Volume_Input_Master:
+            currentVolumeValue = &gVolume_Input_Master_Value;
+            break;
+        case kObjectID_Volume_Output_Master:
+            currentVolumeValue = &gVolume_Output_Master_Value;
+            break;
+        case kObjectID_Mute_Input_Master:
+            currentMuteValue = &gMute_Input_Master_Value;
+            break;
+        case kObjectID_Mute_Output_Master:
+            currentMuteValue = &gMute_Output_Master_Value;
+            break;
+        case kObjectID_DataSource_Input_Master:
+            currentDataSourceValue = &gDataSource_Input_Master_Value;
+            break;
+        case kObjectID_DataSource_Output_Master:
+            currentDataSourceValue = &gDataSource_Output_Master_Value;
+            break;
+        case kObjectID_DataDestination_PlayThru_Master:
+            currentDataSourceValue = &gDataDestination_PlayThru_Master_Value;
+            break;
+        default:
+            // 如果对象ID无效，返回错误
+            theAnswer = kAudioHardwareBadObjectError;
+            goto Done;
+    }
+
+    // 根据属性选择器处理不同类型的控制属性
+    switch (inAddress->mSelector) {
+        case kAudioLevelControlPropertyScalarValue:
+            // 处理标量音量值（范围0.0到1.0）
+            // 当此值改变时，对应的dB值也会改变
+            FailWithAction(inDataSize != sizeof(Float32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetControlPropertyData: kAudioLevelControlPropertyScalarValue 的数据大小错误");
+
+            // 获取并限制新的音量值在有效范围内
+            theNewVolume = *((const Float32 *) inData);
+            if (theNewVolume < 0.0) theNewVolume = 0.0f;
+            if (theNewVolume > 1.0) theNewVolume = 1.0f;
+
+            // 使用互斥锁保护共享资源的访问
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            // 仅当值真正改变时才更新
+            if (currentVolumeValue && *currentVolumeValue != theNewVolume) {
+                *currentVolumeValue = theNewVolume;
+                // 标记两个属性发生改变：标量值和dB值
+                *outNumberPropertiesChanged = 2;
+                // 设置第一个改变的属性（标量值）
+                outChangedAddresses[0].mSelector = kAudioLevelControlPropertyScalarValue;
+                outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+                // 设置第二个改变的属性（dB值）
+                outChangedAddresses[1].mSelector = kAudioLevelControlPropertyDecibelValue;
+                outChangedAddresses[1].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[1].mElement = kAudioObjectPropertyElementMain;
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            break;
+
+        case kAudioLevelControlPropertyDecibelValue:
+            // 处理分贝值，需要先转换为标量值
+            // 因为内部是用标量值存储的
+            FailWithAction(inDataSize != sizeof(Float32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetControlPropertyData: kAudioLevelControlPropertyDecibelValue 的数据大小错误");
+
+            // 获取并限制新的dB值在有效范围内
+            theNewVolume = *((const Float32 *) inData);
+            if (theNewVolume < kVolume_MinDB) theNewVolume = kVolume_MinDB;
+            if (theNewVolume > kVolume_MaxDB) theNewVolume = kVolume_MaxDB;
+
+            // 将dB值转换为标量值，使用平方根提供更好的音量控制曲线
+            theNewVolume = (theNewVolume - kVolume_MinDB) / (kVolume_MaxDB - kVolume_MinDB);
+            theNewVolume = sqrtf(theNewVolume);
+
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            if (currentVolumeValue && *currentVolumeValue != theNewVolume) {
+                *currentVolumeValue = theNewVolume;
+                // 同样标记两个属性的改变
+                *outNumberPropertiesChanged = 2;
+                outChangedAddresses[0].mSelector = kAudioLevelControlPropertyScalarValue;
+                outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+                outChangedAddresses[1].mSelector = kAudioLevelControlPropertyDecibelValue;
+                outChangedAddresses[1].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[1].mElement = kAudioObjectPropertyElementMain;
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            break;
+
+        case kAudioBooleanControlPropertyValue:
+            // 处理布尔控制值（如静音状态）
+            FailWithAction(inDataSize != sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetControlPropertyData: kAudioBooleanControlPropertyValue 的数据大小错误");
+
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            // 检查并更新静音状态
+            if (currentMuteValue && *currentMuteValue != (*((const UInt32 *) inData) != 0)) {
+                *currentMuteValue = *((const UInt32 *) inData) != 0;
+                // 只标记一个属性改变
+                *outNumberPropertiesChanged = 1;
+                outChangedAddresses[0].mSelector = kAudioBooleanControlPropertyValue;
+                outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            break;
+
+        case kAudioSelectorControlPropertyCurrentItem:
+            // 处理选择器控件的当前项（如输入/输出源选择）
+            FailWithAction(inDataSize != sizeof(UInt32),
+                           theAnswer = kAudioHardwareBadPropertySizeError,
+                           Done,
+                           "VirtualAudioDriver_SetControlPropertyData: kAudioSelectorControlPropertyCurrentItem 的数据大小错误");
+
+            // 确保选择的项在有效范围内
+            FailWithAction(*((const UInt32 *) inData) >= kDataSource_NumberItems,
+                           theAnswer = kAudioHardwareIllegalOperationError,
+                           Done,
+                           "VirtualAudioDriver_SetControlPropertyData: kAudioSelectorControlPropertyCurrentItem 请求的项目不在可用项目列表中");
+
+            pthread_mutex_lock(&gPlugIn_StateMutex);
+            // 检查并更新数据源选择
+            if (currentDataSourceValue && *currentDataSourceValue != *((const UInt32 *) inData)) {
+                *currentDataSourceValue = *((const UInt32 *) inData);
+                *outNumberPropertiesChanged = 1;
+                outChangedAddresses[0].mSelector = kAudioSelectorControlPropertyCurrentItem;
+                outChangedAddresses[0].mScope = kAudioObjectPropertyScopeGlobal;
+                outChangedAddresses[0].mElement = kAudioObjectPropertyElementMain;
+            }
+            pthread_mutex_unlock(&gPlugIn_StateMutex);
+            break;
+
+        default:
+            // 处理未知的属性选择器
+            theAnswer = kAudioHardwareUnknownPropertyError;
+            break;
+    }
+
+    Done:
+    // 返回操作结果
     return theAnswer;
 }

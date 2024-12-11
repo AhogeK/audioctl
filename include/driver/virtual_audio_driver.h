@@ -268,4 +268,59 @@ static OSStatus VirtualAudioDriver_GetControlPropertyData(AudioServerPlugInDrive
                                                           UInt32 inQualifierDataSize, const void *inQualifierData,
                                                           UInt32 inDataSize, UInt32 *outDataSize, void *outData);
 
+static OSStatus VirtualAudioDriver_SetPlugInPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         const void *inData,
+                                                         UInt32 *outNumberPropertiesChanged,
+                                                         const AudioObjectPropertyAddress *outChangedAddresses);
+
+static OSStatus VirtualAudioDriver_SetBoxPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                      AudioObjectID inObjectID,
+                                                      pid_t inClientProcessID,
+                                                      const AudioObjectPropertyAddress *inAddress,
+                                                      UInt32 inQualifierDataSize,
+                                                      const void *inQualifierData,
+                                                      UInt32 inDataSize,
+                                                      const void *inData,
+                                                      UInt32 *outNumberPropertiesChanged,
+                                                      AudioObjectPropertyAddress *outChangedAddresses);
+
+static OSStatus VirtualAudioDriver_SetDevicePropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         const void *inData,
+                                                         UInt32 *outNumberPropertiesChanged,
+                                                         AudioObjectPropertyAddress *outChangedAddresses);
+
+static OSStatus VirtualAudioDriver_SetStreamPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                         AudioObjectID inObjectID,
+                                                         pid_t inClientProcessID,
+                                                         const AudioObjectPropertyAddress *inAddress,
+                                                         UInt32 inQualifierDataSize,
+                                                         const void *inQualifierData,
+                                                         UInt32 inDataSize,
+                                                         const void *inData,
+                                                         UInt32 *outNumberPropertiesChanged,
+                                                         AudioObjectPropertyAddress *outChangedAddresses);
+
+static OSStatus VirtualAudioDriver_SetControlPropertyData(AudioServerPlugInDriverRef inDriver,
+                                                          AudioObjectID inObjectID,
+                                                          pid_t inClientProcessID,
+                                                          const AudioObjectPropertyAddress *inAddress,
+                                                          UInt32 inQualifierDataSize,
+                                                          const void *inQualifierData,
+                                                          UInt32 inDataSize,
+                                                          const void *inData,
+                                                          UInt32 *outNumberPropertiesChanged,
+                                                          AudioObjectPropertyAddress *outChangedAddresses);
+
 #endif //AUDIOCTL_VIRTUAL_AUDIO_DRIVER_H
