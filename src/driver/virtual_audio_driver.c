@@ -4203,3 +4203,51 @@ static OSStatus VirtualAudioDriver_SetControlPropertyData(AudioServerPlugInDrive
     // 返回操作结果
     return theAnswer;
 }
+
+#pragma mark IO Operations
+
+static OSStatus
+VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef inDriver, AudioObjectID inDeviceObjectID, UInt32 inClientID) {
+    // 此调用告诉设备，给定客户端的 IO 正在启动。当此例程返回时，设备的时钟正在运行，并准备好读取/写入数据。
+    // 重要的是要注意，多个客户端可以同时在设备上运行 IO。因此，仅在第一个客户端启动时才需要工作。
+    // 所有后续启动仅增加计数器。
+
+#pragma unused(inClientID)
+
+    // 声明局部变量
+    OSStatus theAnswer = 0;
+
+    // 检查参数
+    FailWithAction(inDriver != gAudioServerPlugInDriverRef,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_StartIO: 错误的驱动引用");
+    FailWithAction(inDeviceObjectID != kObjectID_Device,
+                   theAnswer = kAudioHardwareBadObjectError,
+                   Done,
+                   "VirtualAudioDriver_StartIO: 错误的设备 ID");
+
+    // 我们需要持有状态锁
+    pthread_mutex_lock(&gPlugIn_StateMutex);
+
+    // 确定我们需要做什么
+    if (gDevice_IOIsRunning == UINT64_MAX) {
+        // 溢出是一个错误
+        theAnswer = kAudioHardwareIllegalOperationError;
+    } else if (gDevice_IOIsRunning == 0) {
+        // 我们需要启动硬件，在这种情况下只是锚定时间线。
+        gDevice_IOIsRunning = 1;
+        gDevice_NumberTimeStamps = 0;
+        gDevice_AnchorSampleTime = 0;
+        gDevice_AnchorHostTime = mach_absolute_time();
+    } else {
+        // IO 已经在运行，只需增加计数器
+        ++gDevice_IOIsRunning;
+    }
+
+    // 解锁状态锁
+    pthread_mutex_unlock(&gPlugIn_StateMutex);
+
+    Done:
+    return theAnswer;
+}
