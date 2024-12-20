@@ -4,6 +4,8 @@
 #ifndef AUDIO_CONTROL_H
 #define AUDIO_CONTROL_H
 
+#include <CoreAudio/CoreAudio.h>
+#include <CoreServices/CoreServices.h>
 #include <AudioToolbox/AudioToolbox.h>
 
 typedef enum {

@@ -3,7 +3,6 @@
 //
 
 #include "audio_control.h"
-#include <CoreAudio/CoreAudio.h>
 
 // 获取音频设备属性
 static OSStatus getAudioProperty(AudioDeviceID deviceId,
@@ -211,50 +210,120 @@ static void getDeviceStatus(AudioDeviceID deviceId, AudioDeviceInfo *info) {
     getDeviceTransportType(deviceId, info);
 }
 
-// 检查设备是否在某处运行
-static Boolean isDeviceRunningAnywhere(AudioDeviceID deviceId) {
-    UInt32 isRunning;
+// 检查设备是否在指定范围内运行
+static Boolean isDeviceRunningInScope(AudioDeviceID deviceId, AudioObjectPropertyScope scope) {
+    UInt32 isRunning = 0;
     UInt32 dataSize = sizeof(UInt32);
+    AudioObjectPropertyAddress propertyAddress = {
+            .mSelector = kAudioDevicePropertyDeviceIsRunning,
+            .mScope = scope,
+            .mElement = kAudioObjectPropertyElementMain
+    };
 
-    OSStatus status = getAudioProperty(deviceId, kAudioDevicePropertyDeviceIsRunningSomewhere,
-                                       kAudioObjectPropertyScopeGlobal, 0,
-                                       &isRunning, &dataSize);
-    return status == noErr && isRunning != 0;
+    // 首先检查属性是否存在
+    if (!AudioObjectHasProperty(deviceId, &propertyAddress)) {
+        return false;
+    }
+
+    OSStatus status = AudioObjectGetPropertyData(deviceId,
+                                                 &propertyAddress,
+                                                 0,
+                                                 NULL,
+                                                 &dataSize,
+                                                 &isRunning);
+
+    return (status == noErr && isRunning != 0);
 }
 
-// 检查设备是否在指定范围内运行
-static Boolean isDeviceRunningInScope(AudioDeviceID deviceId, AudioDeviceType deviceType) {
-    UInt32 isRunning;
-    UInt32 dataSize = sizeof(UInt32);
-    AudioObjectPropertyScope scope = (deviceType == kDeviceTypeInput) ?
-                                     kAudioDevicePropertyScopeInput :
-                                     kAudioDevicePropertyScopeOutput;
+// 检查设备是否是当前默认设备
+static Boolean isDefaultDevice(AudioDeviceID deviceId, AudioObjectPropertyScope scope) {
+    AudioDeviceID defaultDevice;
+    UInt32 dataSize = sizeof(AudioDeviceID);
+    AudioObjectPropertyAddress propertyAddress = {
+            .mSelector = (scope == kAudioDevicePropertyScopeInput) ?
+                         kAudioHardwarePropertyDefaultInputDevice :
+                         kAudioHardwarePropertyDefaultOutputDevice,
+            .mScope = kAudioObjectPropertyScopeGlobal,
+            .mElement = kAudioObjectPropertyElementMain
+    };
 
-    OSStatus status = getAudioProperty(deviceId, kAudioDevicePropertyDeviceIsRunning,
-                                       scope, 0, &isRunning, &dataSize);
-    return status == noErr && isRunning != 0;
+    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                                 &propertyAddress,
+                                                 0,
+                                                 NULL,
+                                                 &dataSize,
+                                                 &defaultDevice);
+
+    return (status == noErr && defaultDevice == deviceId);
 }
 
 // 检查设备运行状态
 static void checkDeviceRunningStatus(AudioDeviceID deviceId, AudioDeviceInfo *info) {
-    UInt32 isAlive;
+    // 首先检查设备是否活跃
+    UInt32 isAlive = 0;
     UInt32 dataSize = sizeof(UInt32);
+    AudioObjectPropertyAddress aliveAddress = {
+            .mSelector = kAudioDevicePropertyDeviceIsAlive,
+            .mScope = kAudioObjectPropertyScopeGlobal,
+            .mElement = kAudioObjectPropertyElementMain
+    };
 
-    // 检查设备是否活跃
-    OSStatus status = getAudioProperty(deviceId, kAudioDevicePropertyDeviceIsAlive,
-                                       kAudioObjectPropertyScopeGlobal, 0,
-                                       &isAlive, &dataSize);
+    OSStatus status = AudioObjectGetPropertyData(deviceId,
+                                                 &aliveAddress,
+                                                 0,
+                                                 NULL,
+                                                 &dataSize,
+                                                 &isAlive);
+
     if (status != noErr || !isAlive) {
         info->isRunning = false;
         return;
     }
 
-    // 首先检查设备是否在指定范围内运行
-    info->isRunning = isDeviceRunningInScope(deviceId, info->deviceType);
+    // 根据设备类型检查运行状态
+    switch (info->deviceType) {
+        case kDeviceTypeInput:
+            info->isRunning = isDeviceRunningInScope(deviceId, kAudioDevicePropertyScopeInput) ||
+                              isDefaultDevice(deviceId, kAudioDevicePropertyScopeInput);
+            break;
 
-    // 如果没有在指定范围内运行，检查是否在其他地方运行
-    if (!info->isRunning) {
-        info->isRunning = isDeviceRunningAnywhere(deviceId);
+        case kDeviceTypeOutput:
+            info->isRunning = isDeviceRunningInScope(deviceId, kAudioDevicePropertyScopeOutput) ||
+                              isDefaultDevice(deviceId, kAudioDevicePropertyScopeOutput);
+            break;
+
+        case kDeviceTypeInputOutput:
+            info->isRunning = isDeviceRunningInScope(deviceId, kAudioDevicePropertyScopeInput) ||
+                              isDeviceRunningInScope(deviceId, kAudioDevicePropertyScopeOutput) ||
+                              isDefaultDevice(deviceId, kAudioDevicePropertyScopeInput) ||
+                              isDefaultDevice(deviceId, kAudioDevicePropertyScopeOutput);
+            break;
+
+        default:
+            info->isRunning = false;
+    }
+
+    // 添加额外的检查：如果设备正在处理音频流
+    AudioObjectPropertyAddress streamAddress = {
+            .mSelector = kAudioDevicePropertyStreamConfiguration,
+            .mScope = (info->deviceType == kDeviceTypeInput) ?
+                      kAudioDevicePropertyScopeInput :
+                      kAudioDevicePropertyScopeOutput,
+            .mElement = kAudioObjectPropertyElementMain
+    };
+
+    if (AudioObjectHasProperty(deviceId, &streamAddress)) {
+        UInt32 processingState = 0;
+        dataSize = sizeof(UInt32);
+        status = AudioObjectGetPropertyData(deviceId,
+                                            &streamAddress,
+                                            0,
+                                            NULL,
+                                            &dataSize,
+                                            &processingState);
+        if (status == noErr && processingState != 0) {
+            info->isRunning = true;
+        }
     }
 }
 
@@ -355,41 +424,76 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo *info) {
 }
 
 OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
-    // 首先获取设备信息
+
+//    volume *= 0.9996447861194610595703125f; // 降低音量以避免噪音
+
     AudioDeviceInfo deviceInfo;
     OSStatus status = getDeviceInfo(deviceId, &deviceInfo);
     if (status != noErr) {
-        return status; // 如果获取设备信息失败，直接返回错误状态
+        return status;
     }
 
-    // 确定正确的作用域
-    AudioObjectPropertyScope scope;
-    if (deviceInfo.deviceType == kDeviceTypeInput) {
-        scope = kAudioDevicePropertyScopeInput;
-    } else if (deviceInfo.deviceType == kDeviceTypeOutput) {
-        scope = kAudioDevicePropertyScopeOutput;
-    } else {
-        // 对于输入输出设备，我们需要确定用户想要控制哪个方向
-        // 这里可能需要添加额外的参数来指定
-        return kAudioHardwareIllegalOperationError;
+    if (!deviceInfo.hasVolumeControl) {
+        return kAudioHardwareUnsupportedOperationError;
     }
 
+    AudioObjectPropertyScope scope = (deviceInfo.deviceType == kDeviceTypeInput) ?
+                                     kAudioDevicePropertyScopeInput :
+                                     kAudioDevicePropertyScopeOutput;
+
+    // 尝试在主元素（Element 0）上设置 VolumeScalar
     AudioObjectPropertyAddress propertyAddress = {
-            kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
-            scope,
-            kAudioObjectPropertyElementMain
+            .mSelector = kAudioDevicePropertyVolumeScalar,
+            .mScope = scope,
+            .mElement = kAudioObjectPropertyElementMain // Element 0
     };
 
-    // 检查属性是否可设置
     Boolean isSettable = false;
     status = AudioObjectIsPropertySettable(deviceId, &propertyAddress, &isSettable);
-    if (status != noErr || !isSettable) {
-        return kAudioHardwareIllegalOperationError;
+    if (status == noErr && isSettable) {
+        status = AudioObjectSetPropertyData(
+                deviceId,
+                &propertyAddress,
+                0,
+                NULL,
+                sizeof(volume),
+                &volume
+        );
+        if (status == noErr) {
+            return noErr;
+        }
     }
 
-    // 设置音量
-    return AudioObjectSetPropertyData(deviceId, &propertyAddress, 0,
-                                      NULL, sizeof(volume), &volume);
+    // 如果主元素设置失败，尝试设置各个通道的 VolumeScalar
+    UInt32 channelCount = (deviceInfo.deviceType == kDeviceTypeInput) ?
+                          deviceInfo.inputChannelCount :
+                          deviceInfo.outputChannelCount;
+
+    Boolean success = false;
+    for (UInt32 channel = 1; channel <= channelCount; channel++) {
+        propertyAddress.mElement = channel;
+        status = AudioObjectIsPropertySettable(deviceId, &propertyAddress, &isSettable);
+        if (status == noErr && isSettable) {
+            status = AudioObjectSetPropertyData(
+                    deviceId,
+                    &propertyAddress,
+                    0,
+                    NULL,
+                    sizeof(volume),
+                    &volume
+            );
+            if (status == noErr) {
+                success = true;
+            }
+        }
+    }
+
+    if (success) {
+        return noErr;
+    } else {
+        printf("错误：无法设置设备的音量，错误码: %d\n", status);
+        return status;
+    }
 }
 
 OSStatus setDeviceActive(AudioDeviceID deviceId) {
