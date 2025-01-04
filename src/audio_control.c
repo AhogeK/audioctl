@@ -424,9 +424,6 @@ OSStatus getDeviceInfo(AudioDeviceID deviceId, AudioDeviceInfo *info) {
 }
 
 OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
-
-//    volume *= 0.9996447861194610595703125f; // 降低音量以避免噪音
-
     AudioDeviceInfo deviceInfo;
     OSStatus status = getDeviceInfo(deviceId, &deviceInfo);
     if (status != noErr) {
@@ -440,6 +437,30 @@ OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
     AudioObjectPropertyScope scope = (deviceInfo.deviceType == kDeviceTypeInput) ?
                                      kAudioDevicePropertyScopeInput :
                                      kAudioDevicePropertyScopeOutput;
+
+    // 检查并取消静音状态
+    AudioObjectPropertyAddress mutePropertyAddress = {
+            .mSelector = kAudioDevicePropertyMute,
+            .mScope = scope,
+            .mElement = kAudioObjectPropertyElementMain // Element 0
+    };
+
+    Boolean isMuteSettable = false;
+    status = AudioObjectIsPropertySettable(deviceId, &mutePropertyAddress, &isMuteSettable);
+    if (status == noErr && isMuteSettable) {
+        UInt32 muteValue = 0; // 0 表示取消静音
+        status = AudioObjectSetPropertyData(
+                deviceId,
+                &mutePropertyAddress,
+                0,
+                NULL,
+                sizeof(muteValue),
+                &muteValue
+        );
+        if (status != noErr) {
+            printf("警告：无法取消设备的静音状态，错误码: %d\n", status);
+        }
+    }
 
     // 尝试在主元素（Element 0）上设置 VolumeScalar
     AudioObjectPropertyAddress propertyAddress = {
