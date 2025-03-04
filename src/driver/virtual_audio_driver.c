@@ -88,7 +88,7 @@ static bool gMute_Input_Master_Value = false;
 static bool gMute_Output_Master_Value = false;
 
 // 定义数据源相关的全局变量
-static const UInt32 kDataSource_NumberItems = 4;
+static const UInt32 kDataSource_NumberItems = 1;
 static UInt32 gDataSource_Input_Master_Value = 0;
 static UInt32 gDataSource_Output_Master_Value = 0;
 static UInt32 gDataDestination_PlayThru_Master_Value = 0;
@@ -1106,7 +1106,7 @@ static OSStatus VirtualAudioDriver_GetPlugInPropertyData(AudioServerPlugInDriver
                 ((AudioObjectID *) outData)[0] = kObjectID_Box;
             }
 
-            *outDataSize = theNumberItemsToFetch * sizeof(AudioClassID);
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
             break;
 
         case kAudioPlugInPropertyBoxList:
@@ -1158,7 +1158,7 @@ static OSStatus VirtualAudioDriver_GetPlugInPropertyData(AudioServerPlugInDriver
                 ((AudioObjectID *) outData)[0] = kObjectID_Device;
             }
 
-            *outDataSize = theNumberItemsToFetch * sizeof(AudioClassID);
+            *outDataSize = theNumberItemsToFetch * sizeof(AudioObjectID);
             break;
 
         case kAudioPlugInPropertyTranslateUIDToDevice:
@@ -1603,6 +1603,7 @@ static OSStatus VirtualAudioDriver_GetBoxPropertyData(AudioServerPlugInDriverRef
             // Box和设备一样具有UID
             FailWithAction(inDataSize < sizeof(CFStringRef), theAnswer = kAudioHardwareBadPropertySizeError, Done,
                            "VirtualAudioDriver_GetBoxPropertyData: box的kAudioObjectPropertyManufacturer返回值空间不足");
+            *outDataSize = sizeof(CFStringRef);
             *((CFStringRef *) outData) = CFSTR(kBox_UID);
             break;
 
