@@ -32,6 +32,35 @@ static OSStatus isPropertySettable(AudioDeviceID deviceId,
     return AudioObjectIsPropertySettable(deviceId, &propertyAddress, settable);
 }
 
+// 获取设备支持的dB范围
+static OSStatus
+getDeviceVolumeDbRange(AudioDeviceID deviceId, AudioObjectPropertyScope scope, Float32 *minDb, Float32 *maxDb) {
+    AudioObjectPropertyAddress propertyAddress = {
+            kAudioDevicePropertyVolumeRangeDecibels,
+            scope,
+            kAudioObjectPropertyElementMain
+    };
+
+    AudioValueRange dbRange;
+    UInt32 dataSize = sizeof(AudioValueRange);
+
+    OSStatus status = AudioObjectGetPropertyData(deviceId, &propertyAddress,
+                                                 0, NULL,
+                                                 &dataSize, &dbRange);
+
+    if (status != noErr) {
+        // 回退到默认值
+        *minDb = -96.0f;
+        *maxDb = 0.0f;
+        return status;
+    }
+
+    *minDb = dbRange.mMinimum;
+    *maxDb = dbRange.mMaximum;
+
+    return noErr;
+}
+
 // 获取设备音量的详细实现
 static void getVolumeInfo(AudioDeviceID deviceId,
                           AudioDeviceType deviceType,
@@ -66,7 +95,7 @@ static void getVolumeInfo(AudioDeviceID deviceId,
         return;
     }
 
-    // 尝试获取 dB 音量
+    // 尝试获取 dB 音量并转换为标量值
     Float32 volumeDB;
     status = getAudioProperty(deviceId, kAudioDevicePropertyVolumeDecibels, scope,
                               kAudioObjectPropertyElementMain, &volumeDB, &dataSize);
@@ -75,17 +104,26 @@ static void getVolumeInfo(AudioDeviceID deviceId,
     }
 
     *hasVolumeControl = true;
-    if (volumeDB > 0.0f) {
-        *volume = 1.0f;
-        return;
-    }
 
-    if (volumeDB < -96.0f) {
-        *volume = 0.0f;
-        return;
-    }
+    // 获取设备实际的dB范围
+    Float32 minDb, maxDb;
+    if (getDeviceVolumeDbRange(deviceId, scope, &minDb, &maxDb) == noErr) {
+        // 限制在设备范围内
+        if (volumeDB > maxDb) volumeDB = maxDb;
+        if (volumeDB < minDb) volumeDB = minDb;
 
-    *volume = (volumeDB + 96.0f) / 96.0f;
+        // 根据实际范围计算百分比
+        *volume = (volumeDB - minDb) / (maxDb - minDb);
+    } else {
+        // 没有范围信息时使用默认计算
+        if (volumeDB > 0.0f) {
+            *volume = 1.0f;
+        } else if (volumeDB < -96.0f) {
+            *volume = 0.0f;
+        } else {
+            *volume = (volumeDB + 96.0f) / 96.0f;
+        }
+    }
 }
 
 // 获取单个范围（输入/输出）的通道数
@@ -442,7 +480,7 @@ OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
     AudioObjectPropertyAddress mutePropertyAddress = {
             .mSelector = kAudioDevicePropertyMute,
             .mScope = scope,
-            .mElement = kAudioObjectPropertyElementMain // Element 0
+            .mElement = kAudioObjectPropertyElementMain
     };
 
     Boolean isMuteSettable = false;
@@ -462,11 +500,41 @@ OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume) {
         }
     }
 
-    // 尝试在主元素（Element 0）上设置 VolumeScalar
+    // 尝试使用dB值设置音量 - 这是更精确的方法
+    Float32 minDb, maxDb;
+    if (getDeviceVolumeDbRange(deviceId, scope, &minDb, &maxDb) == noErr) {
+        // 根据百分比计算对应的dB值
+        Float32 dbValue = minDb + volume * (maxDb - minDb);
+
+        AudioObjectPropertyAddress dbPropertyAddress = {
+                .mSelector = kAudioDevicePropertyVolumeDecibels,
+                .mScope = scope,
+                .mElement = kAudioObjectPropertyElementMain
+        };
+
+        Boolean isDbSettable = false;
+        status = AudioObjectIsPropertySettable(deviceId, &dbPropertyAddress, &isDbSettable);
+        if (status == noErr && isDbSettable) {
+            status = AudioObjectSetPropertyData(
+                    deviceId,
+                    &dbPropertyAddress,
+                    0,
+                    NULL,
+                    sizeof(dbValue),
+                    &dbValue
+            );
+            if (status == noErr) {
+                return noErr;
+            }
+            // 如果失败，回退到标量设置
+        }
+    }
+
+    // 尝试在主元素上设置 VolumeScalar
     AudioObjectPropertyAddress propertyAddress = {
             .mSelector = kAudioDevicePropertyVolumeScalar,
             .mScope = scope,
-            .mElement = kAudioObjectPropertyElementMain // Element 0
+            .mElement = kAudioObjectPropertyElementMain
     };
 
     Boolean isSettable = false;
