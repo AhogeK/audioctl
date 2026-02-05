@@ -6,11 +6,18 @@ add_executable(test_virtual_audio_device
         test_audio_control.c
         test_audio_processing.c
         test_device_state.c
+        # 新增测试文件
+        test_app_volume_control.c
+        test_virtual_device_manager.c
+        test_aggregate_device_manager.c
 )
 
 # 链接需要测试的源文件
 target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_device.c
+        ${CMAKE_SOURCE_DIR}/src/app_volume_control.c
+        ${CMAKE_SOURCE_DIR}/src/virtual_device_manager.c
+        ${CMAKE_SOURCE_DIR}/src/aggregate_device_manager.c
 )
 
 # 添加包含目录
@@ -25,6 +32,7 @@ target_link_libraries(test_virtual_audio_device PRIVATE
         ${AUDIO_TOOLBOX_LIBRARY}
         ${FOUNDATION_LIBRARY}
         ${APPKIT_LIBRARY}
+        pthread
 )
 
 # 添加测试

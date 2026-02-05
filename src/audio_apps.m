@@ -2,6 +2,7 @@
 #import <AppKit/AppKit.h>
 #import <CoreAudio/CoreAudio.h>
 #import "audio_apps.h"
+#import "app_volume_control.h"
 
 @interface AudioAppManager : NSObject
 + (NSArray *)getRunningAudioApps;
@@ -140,6 +141,9 @@ OSStatus getAudioApps(AudioAppInfo **apps, UInt32 *appCount) {
             return memFullErr;
         }
 
+        // 初始化应用音量控制系统
+        app_volume_control_init();
+
         for (NSUInteger i = 0; i < *appCount; i++) {
             NSRunningApplication *app = audioApps[i];
             AudioAppInfo *info = &(*apps)[i];
@@ -181,9 +185,16 @@ OSStatus getAudioApps(AudioAppInfo **apps, UInt32 *appCount) {
 
             info->deviceId = outputDevice;
 
-            // 设置默认音量为1.0（100%）
-            // 注意：这里我们设置默认值为100%，因为实际的每个应用音量需要更复杂的实现
-            info->volume = 1.0f;
+            // 注册应用到音量控制系统
+            app_volume_register(info->pid, info->bundleId, info->name);
+            
+            // 从音量控制系统获取音量设置
+            Float32 volume;
+            if (app_volume_get(info->pid, &volume) == noErr) {
+                info->volume = volume;
+            } else {
+                info->volume = 1.0f;  // 默认100%
+            }
         }
 
         return noErr;

@@ -2,6 +2,9 @@
 #include "audio_apps.h"
 #include "service_manager.h"
 #include "constants.h"
+#include "app_volume_control.h"
+#include "virtual_device_manager.h"
+#include "aggregate_device_manager.h"
 
 // 命令行选项和程序选项的定义
 typedef struct {
@@ -36,17 +39,41 @@ static const CommandOption *getCommandOptions(void) {
 void printUsage() {
     printf("使用方法：\n");
     printf(" audioctl [命令] [参数]\n\n");
-    printf("可用命令：\n");
-    printf(" help               - 显示帮助信息\n");
-    printf(" list               - 显示所有音频设备\n\n");
-    printf(" set -i/o [音量]    - 设置当前使用中的输入或输出设备的音量 (0-100)\n");
-    printf(" set [设备ID]       - 将指定ID的设备设置为使用中\n");
-    printf(" apps               - 显示所有音频应用\n\n");
-    printf(" --version, -v      - 显示版本信息\n\n");
-    printf(" --start-service    - 启动服务\n");
-    printf(" --stop-service     - 停止服务\n");
-    printf(" --restart-service  - 重启服务\n");
-    printf(" --service-status   - 查看服务状态\n\n");
+    printf("========== 基础命令 ==========\n");
+    printf(" help                   - 显示帮助信息\n");
+    printf(" list                   - 显示所有音频设备\n");
+    printf(" set -i/o [音量]        - 设置当前使用中的输入或输出设备的音量 (0-100)\n");
+    printf(" set [设备ID]           - 将指定ID的设备设置为使用中\n\n");
+
+    printf("========== 虚拟设备命令 ==========\n");
+    printf(" virtual-status         - 显示虚拟设备状态\n");
+    printf(" use-virtual            - 切换到虚拟音频设备（自动创建聚合设备）\n");
+    printf(" use-physical           - 恢复到物理音频设备\n");
+    printf(" agg-status             - 显示 Aggregate Device 状态\n\n");
+
+    printf("========== 应用音量控制 ==========\n");
+    printf(" apps                   - 显示所有音频应用\n");
+    printf(" app-volumes            - 显示所有应用音量控制列表\n");
+    printf(" app-volume [应用] [音量] - 设置指定应用的音量 (0-100)\n");
+    printf("                          应用可以是PID或应用名称\n");
+    printf(" app-mute [应用]        - 静音指定应用\n");
+    printf(" app-unmute [应用]      - 取消静音指定应用\n\n");
+
+    printf("========== 系统命令 ==========\n");
+    printf(" --version, -v          - 显示版本信息\n");
+    printf(" --start-service        - 启动服务\n");
+    printf(" --stop-service         - 停止服务\n");
+    printf(" --restart-service      - 重启服务\n");
+    printf(" --service-status       - 查看服务状态\n\n");
+
+    printf("========== 使用示例 ==========\n");
+    printf(" audioctl virtual-status          # 检查虚拟设备状态\n");
+    printf(" audioctl use-virtual             # 切换到虚拟设备（创建Aggregate Device）\n");
+    printf(" audioctl agg-status              # 查看Aggregate Device状态\n");
+    printf(" audioctl app-volumes             # 查看应用音量列表\n");
+    printf(" audioctl app-volume Safari 50    # 设置Safari音量为50%%\n");
+    printf(" audioctl app-mute Chrome         # 静音Chrome\n");
+    printf(" audioctl use-physical            # 恢复物理设备\n\n");
 
     // 使用专门用于显示帮助的选项数组
     const CommandOption *options = getCommandOptions();
@@ -504,6 +531,120 @@ int main(const int argc, char *argv[]) {
 
     if (strcmp(argv[1], "apps") == 0) {
         return handleAppsCommand();
+    }
+
+    if (strcmp(argv[1], "app-volumes") == 0)
+    {
+        // 检查 Aggregate Device 状态
+        if (!aggregate_device_is_active())
+        {
+            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
+            printf("\n");
+            aggregate_device_print_status();
+            printf("\n请运行: audioctl use-virtual 激活\n");
+            return 1;
+        }
+        app_volume_control_init();
+        app_volume_cli_list();
+        app_volume_control_cleanup();
+        return 0;
+    }
+
+    if (strcmp(argv[1], "app-volume") == 0)
+    {
+        if (argc < 4)
+        {
+            printf("错误: 需要应用名称/PID和音量值\n");
+            printf("用法: audioctl app-volume [应用] [音量]\n");
+            return 1;
+        }
+        // 检查 Aggregate Device 状态
+        if (!aggregate_device_is_active())
+        {
+            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
+            printf("请运行: audioctl use-virtual 激活\n");
+            return 1;
+        }
+        app_volume_control_init();
+        float volume = strtof(argv[3], NULL);
+        int result = app_volume_cli_set(argv[2], volume);
+        app_volume_control_cleanup();
+        return result;
+    }
+
+    if (strcmp(argv[1], "app-mute") == 0)
+    {
+        if (argc < 3)
+        {
+            printf("错误: 需要应用名称/PID\n");
+            printf("用法: audioctl app-mute [应用]\n");
+            return 1;
+        }
+        // 检查 Aggregate Device 状态
+        if (!aggregate_device_is_active())
+        {
+            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
+            printf("请运行: audioctl use-virtual 激活\n");
+            return 1;
+        }
+        app_volume_control_init();
+        int result = app_volume_cli_mute(argv[2], true);
+        app_volume_control_cleanup();
+        return result;
+    }
+
+    if (strcmp(argv[1], "app-unmute") == 0)
+    {
+        if (argc < 3)
+        {
+            printf("错误: 需要应用名称/PID\n");
+            printf("用法: audioctl app-unmute [应用]\n");
+            return 1;
+        }
+        // 检查 Aggregate Device 状态
+        if (!aggregate_device_is_active())
+        {
+            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
+            printf("请运行: audioctl use-virtual 激活\n");
+            return 1;
+        }
+        app_volume_control_init();
+        int result = app_volume_cli_mute(argv[2], false);
+        app_volume_control_cleanup();
+        return result;
+    }
+
+    if (strcmp(argv[1], "virtual-status") == 0)
+    {
+        virtual_device_print_status();
+        return 0;
+    }
+
+    if (strcmp(argv[1], "use-virtual") == 0)
+    {
+        if (!virtual_device_is_installed())
+        {
+            printf("❌ 虚拟音频设备未安装\n\n");
+            printf("请运行以下命令安装:\n");
+            printf("  cd cmake-build-debug\n");
+            printf("  sudo ninja install\n\n");
+            printf("安装后重启音频服务:\n");
+            printf("  sudo launchctl kickstart -k system/com.apple.audio.coreaudiod\n");
+            return 1;
+        }
+        // 使用 Aggregate Device 方式激活
+        return aggregate_device_activate() == noErr ? 0 : 1;
+    }
+
+    if (strcmp(argv[1], "use-physical") == 0)
+    {
+        return aggregate_device_deactivate() == noErr ? 0 : 1;
+    }
+
+    if (strcmp(argv[1], "agg-status") == 0)
+    {
+        aggregate_device_print_status();
+        return 0;
     }
 
     if (strcmp(argv[1], "--start-service") == 0) {

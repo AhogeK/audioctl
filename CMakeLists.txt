@@ -52,6 +52,8 @@ endif ()
 # 添加虚拟音频驱动插件
 add_library(virtual_audio_driver MODULE
         "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
+        "${CMAKE_SOURCE_DIR}/src/driver/app_volume_driver.c"
+        "${CMAKE_SOURCE_DIR}/src/app_volume_control.c"
 )
 
 # 添加资源文件到目标
@@ -100,9 +102,10 @@ file(GLOB_RECURSE HEADER_FILES
         "${CMAKE_SOURCE_DIR}/include/*.h"
 )
 
-# 从主程序源文件中排除设备相关源文件
+# 从主程序源文件中排除驱动相关源文件（驱动是单独编译的）
 list(REMOVE_ITEM SOURCE_FILES
         "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
+        "${CMAKE_SOURCE_DIR}/src/driver/app_volume_driver.c"
 )
 
 # 添加主可执行文件
@@ -115,7 +118,14 @@ target_link_libraries(audioctl PRIVATE
         ${AUDIO_TOOLBOX_LIBRARY}
         ${FOUNDATION_LIBRARY}
         ${APPKIT_LIBRARY}
+        pthread
 )
+
+# 链接 Aggregate Device 需要的 AudioUnit 框架
+find_library(AUDIO_UNIT_LIBRARY AudioUnit)
+if (AUDIO_UNIT_LIBRARY)
+    target_link_libraries(audioctl PRIVATE ${AUDIO_UNIT_LIBRARY})
+endif ()
 
 # 设置主程序属性
 set_target_properties(audioctl PROPERTIES
