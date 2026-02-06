@@ -15,7 +15,8 @@ extern int run_app_volume_control_tests(void);
 extern int run_virtual_device_manager_tests(void);
 extern int run_aggregate_device_manager_tests(void);
 
-int main() {
+int main()
+{
     printf("========================================\n");
     printf("    AudioCtl Test Suite\n");
     printf("========================================\n");
@@ -27,7 +28,7 @@ int main() {
     failed += run_audio_control_tests();
     failed += run_audio_processing_tests();
     failed += run_device_state_tests();
-    
+
     // 新增测试
     failed += run_app_volume_control_tests();
     failed += run_virtual_device_manager_tests();
@@ -35,11 +36,14 @@ int main() {
 
     printf("\n========================================\n");
     printf("Test summary: ");
-    if (failed == 0) {
+    if (failed == 0)
+    {
         printf("All tests PASSED! ✅\n");
         printf("========================================\n");
         return 0;
-    } else {
+    }
+    else
+    {
         printf("%d tests FAILED! ❌\n", failed);
         printf("========================================\n");
         return 1;

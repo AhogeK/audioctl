@@ -7,25 +7,28 @@
 
 // 默认音频格式配置
 static const AudioStreamBasicDescription kDefaultAudioFormat = {
-        .mSampleRate = 48000.0,
-        .mFormatID = kAudioFormatLinearPCM,
-        .mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
-        .mBytesPerPacket = 8,
-        .mFramesPerPacket = 1,
-        .mBytesPerFrame = 8,
-        .mChannelsPerFrame = 2,
-        .mBitsPerChannel = 32
+    .mSampleRate = 48000.0,
+    .mFormatID = kAudioFormatLinearPCM,
+    .mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+    .mBytesPerPacket = 8,
+    .mFramesPerPacket = 1,
+    .mBytesPerFrame = 8,
+    .mChannelsPerFrame = 2,
+    .mBitsPerChannel = 32
 };
 
 // 设备初始化
-OSStatus virtual_device_create(VirtualAudioDevice **outDevice) {
-    if (outDevice == NULL) {
+OSStatus virtual_device_create(VirtualAudioDevice** outDevice)
+{
+    if (outDevice == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
     // 分配设备结构体内存
-    VirtualAudioDevice *device = (VirtualAudioDevice *) calloc(1, sizeof(VirtualAudioDevice));
-    if (device == NULL) {
+    VirtualAudioDevice* device = (VirtualAudioDevice*)calloc(1, sizeof(VirtualAudioDevice));
+    if (device == NULL)
+    {
         return kAudio_MemFullError;
     }
 
@@ -50,9 +53,10 @@ OSStatus virtual_device_create(VirtualAudioDevice **outDevice) {
     device->outputStream.bufferFrameSize = 512; // 音频缓冲区大小设置为512帧
 
     // 分配音频缓冲区
-    device->outputStream.bufferList = (AudioBufferList *) calloc(1,
-                                                                 sizeof(AudioBufferList) + sizeof(AudioBuffer));
-    if (device->outputStream.bufferList == NULL) {
+    device->outputStream.bufferList = (AudioBufferList*)calloc(1,
+                                                               sizeof(AudioBufferList) + sizeof(AudioBuffer));
+    if (device->outputStream.bufferList == NULL)
+    {
         virtual_device_destroy(device);
         return kAudio_MemFullError;
     }
@@ -60,11 +64,12 @@ OSStatus virtual_device_create(VirtualAudioDevice **outDevice) {
     device->outputStream.bufferList->mNumberBuffers = 1;
     device->outputStream.bufferList->mBuffers[0].mNumberChannels = 2;
     device->outputStream.bufferList->mBuffers[0].mDataByteSize =
-            device->outputStream.bufferFrameSize * sizeof(Float32) * 2;
+        device->outputStream.bufferFrameSize * sizeof(Float32) * 2;
     device->outputStream.bufferList->mBuffers[0].mData =
-            calloc(1, device->outputStream.bufferList->mBuffers[0].mDataByteSize);
+        calloc(1, device->outputStream.bufferList->mBuffers[0].mDataByteSize);
 
-    if (device->outputStream.bufferList->mBuffers[0].mData == NULL) {
+    if (device->outputStream.bufferList->mBuffers[0].mData == NULL)
+    {
         virtual_device_destroy(device);
         return kAudio_MemFullError;
     }
@@ -74,26 +79,33 @@ OSStatus virtual_device_create(VirtualAudioDevice **outDevice) {
 }
 
 // 设备销毁
-void virtual_device_destroy(VirtualAudioDevice *device) {
-    if (device != NULL) {
+void virtual_device_destroy(VirtualAudioDevice* device)
+{
+    if (device != NULL)
+    {
         // 停止设备
-        if (atomic_load(&device->deviceIsRunning)) {
+        if (atomic_load(&device->deviceIsRunning))
+        {
             virtual_device_stop(device);
         }
 
         // 清理音频缓冲区
-        if (device->outputStream.bufferList != NULL) {
-            if (device->outputStream.bufferList->mBuffers[0].mData != NULL) {
+        if (device->outputStream.bufferList != NULL)
+        {
+            if (device->outputStream.bufferList->mBuffers[0].mData != NULL)
+            {
                 free(device->outputStream.bufferList->mBuffers[0].mData);
             }
             free(device->outputStream.bufferList);
         }
 
         // 清理 CFString 对象
-        if (device->deviceUID != NULL) {
+        if (device->deviceUID != NULL)
+        {
             CFRelease(device->deviceUID);
         }
-        if (device->deviceName != NULL) {
+        if (device->deviceName != NULL)
+        {
             CFRelease(device->deviceName);
         }
 
@@ -106,9 +118,11 @@ void virtual_device_destroy(VirtualAudioDevice *device) {
 }
 
 // 设备启动
-OSStatus virtual_device_start(VirtualAudioDevice *device) {
+OSStatus virtual_device_start(VirtualAudioDevice* device)
+{
     // 参数检查
-    if (device == NULL) {
+    if (device == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -116,22 +130,26 @@ OSStatus virtual_device_start(VirtualAudioDevice *device) {
     pthread_mutex_lock(&device->stateMutex);
 
     // 检查当前状态
-    if (device->state == DEVICE_STATE_RUNNING) {
+    if (device->state == DEVICE_STATE_RUNNING)
+    {
         pthread_mutex_unlock(&device->stateMutex);
         return kAudioHardwareNoError; // 设备已经在运行
     }
 
     // 检查设备是否处于可启动状态
-    if (device->state != DEVICE_STATE_STOPPED) {
+    if (device->state != DEVICE_STATE_STOPPED)
+    {
         pthread_mutex_unlock(&device->stateMutex);
         return kAudioHardwareIllegalOperationError;
     }
 
     // 初始化音频输出流
-    if (!device->outputStream.isActive) {
+    if (!device->outputStream.isActive)
+    {
         // 清空音频缓冲区
         if (device->outputStream.bufferList != NULL &&
-            device->outputStream.bufferList->mBuffers[0].mData != NULL) {
+            device->outputStream.bufferList->mBuffers[0].mData != NULL)
+        {
             memset(device->outputStream.bufferList->mBuffers[0].mData, 0,
                    device->outputStream.bufferList->mBuffers[0].mDataByteSize);
         }
@@ -150,9 +168,11 @@ OSStatus virtual_device_start(VirtualAudioDevice *device) {
 }
 
 // 设备停止
-OSStatus virtual_device_stop(VirtualAudioDevice *device) {
+OSStatus virtual_device_stop(VirtualAudioDevice* device)
+{
     // 参数检查
-    if (device == NULL) {
+    if (device == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -160,25 +180,29 @@ OSStatus virtual_device_stop(VirtualAudioDevice *device) {
     pthread_mutex_lock(&device->stateMutex);
 
     // 检查当前状态
-    if (device->state == DEVICE_STATE_STOPPED) {
+    if (device->state == DEVICE_STATE_STOPPED)
+    {
         pthread_mutex_unlock(&device->stateMutex);
         return kAudioHardwareNoError; // 设备已经停止
     }
 
     // 检查设备是否处于可停止状态
-    if (device->state != DEVICE_STATE_RUNNING) {
+    if (device->state != DEVICE_STATE_RUNNING)
+    {
         pthread_mutex_unlock(&device->stateMutex);
         return kAudioHardwareIllegalOperationError;
     }
 
     // 停止音频输出流
-    if (device->outputStream.isActive) {
+    if (device->outputStream.isActive)
+    {
         // 停止数据流
         device->outputStream.isActive = false;
 
         // 清空音频缓冲区
         if (device->outputStream.bufferList != NULL &&
-            device->outputStream.bufferList->mBuffers[0].mData != NULL) {
+            device->outputStream.bufferList->mBuffers[0].mData != NULL)
+        {
             memset(device->outputStream.bufferList->mBuffers[0].mData, 0,
                    device->outputStream.bufferList->mBuffers[0].mDataByteSize);
         }
@@ -195,8 +219,10 @@ OSStatus virtual_device_stop(VirtualAudioDevice *device) {
 }
 
 // 设置静音状态
-OSStatus virtual_device_set_mute(VirtualAudioDevice *device, Boolean mute) {
-    if (device == NULL) {
+OSStatus virtual_device_set_mute(VirtualAudioDevice* device, Boolean mute)
+{
+    if (device == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -213,8 +239,10 @@ OSStatus virtual_device_set_mute(VirtualAudioDevice *device, Boolean mute) {
 }
 
 // 获取静音状态
-OSStatus virtual_device_get_mute(const VirtualAudioDevice *device, Boolean *outMute) {
-    if (device == NULL || outMute == NULL) {
+OSStatus virtual_device_get_mute(const VirtualAudioDevice* device, Boolean* outMute)
+{
+    if (device == NULL || outMute == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -225,13 +253,16 @@ OSStatus virtual_device_get_mute(const VirtualAudioDevice *device, Boolean *outM
 }
 
 // 设置音量
-OSStatus virtual_device_set_volume(VirtualAudioDevice *device, Float32 volume) {
-    if (device == NULL) {
+OSStatus virtual_device_set_volume(VirtualAudioDevice* device, Float32 volume)
+{
+    if (device == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
     // 检查音量范围 (0.0-100.0)
-    if (volume < 0.0f || volume > 100.0f) {
+    if (volume < 0.0f || volume > 100.0f)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -248,8 +279,10 @@ OSStatus virtual_device_set_volume(VirtualAudioDevice *device, Float32 volume) {
 }
 
 // 获取音量
-OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *outVolume) {
-    if (device == NULL || outVolume == NULL) {
+OSStatus virtual_device_get_volume(const VirtualAudioDevice* device, Float32* outVolume)
+{
+    if (device == NULL || outVolume == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -260,28 +293,36 @@ OSStatus virtual_device_get_volume(const VirtualAudioDevice *device, Float32 *ou
 }
 
 
-void apply_volume_and_clamp(Float32 *samples, UInt32 sampleCount, Float32 volumeScale) {
-    for (UInt32 i = 0; i < sampleCount; i++) {
+void apply_volume_and_clamp(Float32* samples, UInt32 sampleCount, Float32 volumeScale)
+{
+    for (UInt32 i = 0; i < sampleCount; i++)
+    {
         samples[i] *= volumeScale;
 
         // 防止音频信号过载
-        if (samples[i] > 1.0f) {
+        if (samples[i] > 1.0f)
+        {
             samples[i] = 1.0f;
-        } else if (samples[i] < -1.0f) {
+        }
+        else if (samples[i] < -1.0f)
+        {
             samples[i] = -1.0f;
         }
     }
 }
 
 // 输出处理
-OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
-                                       AudioBufferList *outputData,
-                                       UInt32 frameCount) {
-    if (device == NULL || outputData == NULL || frameCount == 0) {
+OSStatus virtual_device_process_output(const VirtualAudioDevice* device,
+                                       AudioBufferList* outputData,
+                                       UInt32 frameCount)
+{
+    if (device == NULL || outputData == NULL || frameCount == 0)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
-    if (device->state != DEVICE_STATE_RUNNING) {
+    if (device->state != DEVICE_STATE_RUNNING)
+    {
         return kAudioHardwareNotRunningError;
     }
 
@@ -293,15 +334,19 @@ OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
     Float32 volumeScale = isMuted ? 0.0f : (currentVolume / 100.0f);
 
     // 处理每个缓冲区
-    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; bufferIndex++) {
-        AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
-        Float32 *samples = (Float32 *) buffer->mData;
+    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; bufferIndex++)
+    {
+        AudioBuffer* buffer = &outputData->mBuffers[bufferIndex];
+        Float32* samples = (Float32*)buffer->mData;
         UInt32 sampleCount = frameCount * buffer->mNumberChannels;
 
         // 如果完全静音或音量为0，直接清零
-        if (isMuted || currentVolume <= 0.0f) {
+        if (isMuted || currentVolume <= 0.0f)
+        {
             memset(samples, 0, sampleCount * sizeof(Float32));
-        } else {
+        }
+        else
+        {
             apply_volume_and_clamp(samples, sampleCount, volumeScale);
         }
 
@@ -313,8 +358,10 @@ OSStatus virtual_device_process_output(const VirtualAudioDevice *device,
 }
 
 // 获取设备状态
-OSStatus virtual_device_get_state(VirtualAudioDevice *device, DeviceState *outState) {
-    if (device == NULL || outState == NULL) {
+OSStatus virtual_device_get_state(VirtualAudioDevice* device, DeviceState* outState)
+{
+    if (device == NULL || outState == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 
@@ -327,8 +374,10 @@ OSStatus virtual_device_get_state(VirtualAudioDevice *device, DeviceState *outSt
 }
 
 // 获取设备运行状态
-OSStatus virtual_device_is_running(const VirtualAudioDevice *device, Boolean *outIsRunning) {
-    if (device == NULL || outIsRunning == NULL) {
+OSStatus virtual_device_is_running(const VirtualAudioDevice* device, Boolean* outIsRunning)
+{
+    if (device == NULL || outIsRunning == NULL)
+    {
         return kAudioHardwareIllegalOperationError;
     }
 

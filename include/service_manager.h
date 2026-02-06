@@ -27,7 +27,8 @@
 #endif
 
 // 服务状态
-typedef enum {
+typedef enum
+{
     SERVICE_STATUS_SUCCESS,
     SERVICE_STATUS_ERROR,
     SERVICE_STATUS_ALREADY_RUNNING,

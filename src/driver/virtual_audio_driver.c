@@ -1891,6 +1891,8 @@ static OSStatus VirtualAudioDriver_SetBoxPropertyData(AudioServerPlugInDriverRef
                                };
                                gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_Box, 1, &theAddress);
                     
+                           
+                           
                            });
         }
         break;
@@ -1930,6 +1932,8 @@ static OSStatus VirtualAudioDriver_SetBoxPropertyData(AudioServerPlugInDriverRef
                                    };
                                    gPlugIn_Host->PropertiesChanged(gPlugIn_Host, kObjectID_PlugIn, 1, &theAddress);
                 
+                               
+                               
                                });
             }
             pthread_mutex_unlock(&gPlugIn_StateMutex);
@@ -2760,6 +2764,8 @@ static OSStatus VirtualAudioDriver_SetDevicePropertyData(AudioServerPlugInDriver
                                    gPlugIn_Host, kObjectID_Device, theNewSampleRate,
                                    NULL);
                 
+                           
+                           
                            });
         }
         break;
@@ -3326,6 +3332,8 @@ static OSStatus VirtualAudioDriver_SetStreamPropertyData(AudioServerPlugInDriver
                                    gPlugIn_Host, kObjectID_Device, theNewSampleRate,
                                    NULL);
                 
+                           
+                           
                            });
         }
         break;
