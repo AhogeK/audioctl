@@ -5,6 +5,56 @@
 #include "app_volume_control.h"
 #include "virtual_device_manager.h"
 #include "aggregate_device_manager.h"
+#include "audio_router.h"
+#include <signal.h>
+#include <mach-o/dyld.h>
+
+// 路由进程 PID 文件
+#define ROUTER_PID_FILE "/tmp/audioctl_router.pid"
+
+static void kill_router(void)
+{
+    FILE* fp = fopen(ROUTER_PID_FILE, "r");
+    if (fp)
+    {
+        int pid = 0;
+        if (fscanf(fp, "%d", &pid) == 1 && pid > 0)
+        {
+            kill(pid, SIGTERM);
+        }
+        fclose(fp);
+        unlink(ROUTER_PID_FILE);
+    }
+}
+
+void spawn_router(const char* self_path)
+{
+    kill_router(); // 确保旧的已停止
+
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        // Child
+        setsid(); // Detach
+        // Redirect output to /dev/null to avoid cluttering terminal
+        freopen("/dev/null", "w", stdout);
+        freopen("/dev/null", "w", stderr);
+
+        execl(self_path, "audioctl", "internal-route", NULL);
+        exit(1);
+    }
+    else if (pid > 0)
+    {
+        // Parent
+        FILE* fp = fopen(ROUTER_PID_FILE, "w");
+        if (fp)
+        {
+            fprintf(fp, "%d", pid);
+            fclose(fp);
+        }
+        printf("后台音频路由已启动 (PID: %d)\n", pid);
+    }
+}
 
 // 命令行选项和程序选项的定义
 typedef struct
@@ -723,13 +773,38 @@ int main(const int argc, char* argv[])
             printf("  sudo launchctl kickstart -k system/com.apple.audio.coreaudiod\n");
             return 1;
         }
-        // 使用 Aggregate Device 方式激活
-        return aggregate_device_activate() == noErr ? 0 : 1;
+
+        // 1. 创建聚合设备
+        if (aggregate_device_activate() != noErr)
+        {
+            return 1;
+        }
+
+        // 2. 启动混音路由器 (搬运 1-2 到 3-4)
+        char self_path[4096];
+        uint32_t size = sizeof(self_path);
+        if (_NSGetExecutablePath(self_path, &size) == 0)
+        {
+            spawn_router(self_path);
+        }
+        else
+        {
+            fprintf(stderr, "无法获取可执行文件路径，路由无法启动\n");
+        }
+
+        return 0;
     }
 
     if (strcmp(argv[1], "use-physical") == 0)
     {
+        kill_router();
         return aggregate_device_deactivate() == noErr ? 0 : 1;
+    }
+
+    if (strcmp(argv[1], "internal-route") == 0)
+    {
+        start_router_loop();
+        return 0;
     }
 
     if (strcmp(argv[1], "agg-status") == 0)

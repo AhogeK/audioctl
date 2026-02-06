@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(audioctl C OBJC)
+project(audioctl VERSION 1.0.0 LANGUAGES C OBJC)
 enable_testing()
 
 # 基本设置
@@ -12,6 +12,9 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15" CACHE STRING "Minimum OS X deployment ve
 # 编译选项
 option(DEBUG_MODE "Enable debug mode" ON)
 add_compile_options(-Wall -Wextra)
+
+# 定义版本号
+add_compile_definitions(AUDIOCTL_VERSION="${PROJECT_VERSION}")
 
 if (DEBUG_MODE)
     add_compile_definitions(DEBUG)

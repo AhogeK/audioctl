@@ -213,34 +213,46 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
     Float32 volume = 1.0f;
     bool isMuted = false;
 
-    // 获取PID
-    pid_t pid = app_volume_driver_get_pid(clientID);
-    if (pid < 0)
+    // 1. 获取 PID (使用 TryLock)
+    pid_t pid = -1;
+    if (pthread_mutex_trylock(&g_clientManager.mutex) == 0)
     {
-        // 未找到客户端，使用默认音量
-        if (outIsMuted != NULL)
-        {
-            *outIsMuted = false;
-        }
+        ClientVolumeEntry* entry = find_client_by_id(clientID);
+        pid = entry != NULL ? entry->pid : -1;
+        pthread_mutex_unlock(&g_clientManager.mutex);
+    }
+    else
+    {
+        // 如果获取锁失败（例如被其他线程持有），直接返回默认值，避免阻塞 IO 线程
+        if (outIsMuted != NULL) *outIsMuted = false;
         return 1.0f;
     }
 
-    // 从共享内存读取音量
+    if (pid < 0)
+    {
+        if (outIsMuted != NULL) *outIsMuted = false;
+        return 1.0f;
+    }
+
+    // 2. 从共享内存读取音量 (使用 TryLock)
     if (g_shmVolumeList != NULL)
     {
-        pthread_mutex_lock(&g_shmVolumeList->mutex);
-
-        for (UInt32 i = 0; i < g_shmVolumeList->count; i++)
+        // 关键修复：使用 trylock 防止死锁。
+        // 如果共享内存锁被持有（例如 CLI 崩溃），我们不能在这里等待。
+        if (pthread_mutex_trylock(&g_shmVolumeList->mutex) == 0)
         {
-            if (g_shmVolumeList->entries[i].pid == pid)
+            for (UInt32 i = 0; i < g_shmVolumeList->count; i++)
             {
-                volume = g_shmVolumeList->entries[i].volume;
-                isMuted = g_shmVolumeList->entries[i].isMuted;
-                break;
+                if (g_shmVolumeList->entries[i].pid == pid)
+                {
+                    volume = g_shmVolumeList->entries[i].volume;
+                    isMuted = g_shmVolumeList->entries[i].isMuted;
+                    break;
+                }
             }
+            pthread_mutex_unlock(&g_shmVolumeList->mutex);
         }
-
-        pthread_mutex_unlock(&g_shmVolumeList->mutex);
+        // 如果无法获取锁，保持默认音量 (1.0)，确保不阻塞音频流
     }
 
     if (outIsMuted != NULL)

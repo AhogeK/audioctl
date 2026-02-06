@@ -10,7 +10,7 @@ set -e  # 遇到错误立即退出
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # 默认配置
-BUILD_TYPE="Debug"
+BUILD_TYPE="debug"
 PARALLEL_JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 DRIVER_NAME="VirtualAudioDriver"
 DRIVER_PATH="/Library/Audio/Plug-Ins/HAL/${DRIVER_NAME}.driver"
@@ -75,8 +75,20 @@ detect_tools() {
         exit 1
     fi
     
-    # 设置构建目录
-    BUILD_DIR="${PROJECT_DIR}/cmake-build-${BUILD_TYPE}"
+    # 设置构建目录 (使用小写标准)
+    if [ "$BUILD_TYPE" = "Release" ] || [ "$BUILD_TYPE" = "release" ]; then
+        BUILD_TYPE="Release"
+        BUILD_DIR="${PROJECT_DIR}/cmake-build-release"
+    else
+        BUILD_TYPE="Debug"
+        BUILD_DIR="${PROJECT_DIR}/cmake-build-debug"
+    fi
+    
+    # 清理旧的大写目录 (如果存在)
+    if [ -d "${PROJECT_DIR}/cmake-build-Debug" ] && [ "$BUILD_DIR" != "${PROJECT_DIR}/cmake-build-Debug" ]; then
+        log_warn "清理旧的构建目录: cmake-build-Debug"
+        rm -rf "${PROJECT_DIR}/cmake-build-Debug"
+    fi
 }
 
 # ============================================
@@ -150,8 +162,10 @@ cmd_install() {
         log_info "如需跳过，请使用: ./install.sh install --skip-existing"
     fi
     
-    # 卸载旧驱动
-    cmd_uninstall --quiet
+    # 卸载旧驱动（忽略错误，因为可能未安装，不重启 CoreAudio）
+    if [ -d "$DRIVER_PATH" ]; then
+        sudo rm -rf "$DRIVER_PATH"
+    fi
     
     # 创建构建目录
     mkdir -p "${BUILD_DIR}"
@@ -186,11 +200,10 @@ cmd_install() {
     
     # 重启 CoreAudio
     log_step "重启 CoreAudio"
-    sudo launchctl kickstart -k system/com.apple.audio.coreaudiod || {
-        log_warn "重启失败，尝试替代方法"
-        sudo killall -9 coreaudiod 2>/dev/null || true
-    }
-    sleep 2
+    # 强制杀死进程，防止因死锁导致无法响应
+    sudo killall -9 coreaudiod 2>/dev/null || true
+    sleep 1
+    sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true
     log_success "CoreAudio 已重启"
     
     # 运行测试
@@ -261,8 +274,10 @@ cmd_uninstall() {
     if [ "$quiet" = false ]; then
         log_info "停止 CoreAudio..."
     fi
-    sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true
+    sudo killall -9 coreaudiod 2>/dev/null || true
     sleep 1
+    sudo launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true
+    sleep 2
     
     # 删除驱动
     if [ -d "$DRIVER_PATH" ]; then
@@ -457,12 +472,14 @@ cmd_help() {
 
 main() {
     # 显示 Banner
-    printf "${CYAN}"
-    printf "    _             _     _ _   _\n"
-    printf "   / \\   ___  ___| |__ (_) |_| |_ ___\n"
-    printf "  / _ \\ / _ \\/ __| '_ \\| | __| __/ _ \\\n"
-    printf " / ___ \\  __/ (__| | | | | |_| ||  __/\n"
-    printf "/_/   \\_\\___|\\___|_| |_|_|\\__|\\__\\___|\n"
+    printf "${CYAN}\n"
+    cat << 'EOF'
+    _             _     _ _   _
+   / \   ___  ___| |__ (_) |_| |_ ___
+  / _ \ / _ \/ __| '_ \| | __| __/ _ \
+ / ___ \  __/ (__| | | | | |_| ||  __/
+/_/   \_\___|\___|_| |_|_|\__|\__\___|
+EOF
     printf "${NC}\n"
     
     # 检查是否在项目根目录

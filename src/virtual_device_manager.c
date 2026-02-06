@@ -4,9 +4,12 @@
 //
 
 #include "virtual_device_manager.h"
+#include "aggregate_device_manager.h"
 #include "audio_control.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
+#include <unistd.h>
 
 #pragma mark - 内部辅助函数
 
@@ -86,36 +89,38 @@ static OSStatus get_device_name(AudioDeviceID deviceId, char* name, size_t nameS
 // 查找虚拟设备
 static AudioDeviceID find_virtual_device(void)
 {
-    AudioDeviceID* devices = NULL;
-    UInt32 count = 0;
-
-    OSStatus status = get_all_devices(&devices, &count);
-    if (status != noErr || devices == NULL) return kAudioObjectUnknown;
-
     AudioDeviceID virtualDevice = kAudioObjectUnknown;
 
-    for (UInt32 i = 0; i < count; i++)
+    // 最多尝试 5 次，每次间隔 500ms
+    for (int attempt = 0; attempt < 5; attempt++)
     {
-        char uid[256] = {0};
-        status = get_device_uid(devices[i], uid, sizeof(uid));
+        AudioDeviceID* devices = NULL;
+        UInt32 count = 0;
 
-        if (status == noErr && strstr(uid, VIRTUAL_DEVICE_UID) != NULL)
+        if (get_all_devices(&devices, &count) == noErr && devices != NULL)
         {
-            virtualDevice = devices[i];
-            break;
+            for (UInt32 i = 0; i < count; i++)
+            {
+                char uid[256] = {0};
+                char name[256] = {0};
+
+                get_device_uid(devices[i], uid, sizeof(uid));
+                get_device_name(devices[i], name, sizeof(name));
+
+                if (strstr(uid, VIRTUAL_DEVICE_UID) != NULL ||
+                    strstr(name, "Virtual Audio") != NULL)
+                {
+                    virtualDevice = devices[i];
+                    break;
+                }
+            }
+            free(devices);
         }
 
-        // 备用：通过名称匹配
-        char name[256] = {0};
-        status = get_device_name(devices[i], name, sizeof(name));
-        if (status == noErr && strstr(name, "Virtual") != NULL)
-        {
-            virtualDevice = devices[i];
-            // 继续搜索，优先匹配UID
-        }
+        if (virtualDevice != kAudioObjectUnknown) break;
+        usleep(500000);
     }
 
-    free(devices);
     return virtualDevice;
 }
 
@@ -188,7 +193,16 @@ bool virtual_device_is_active_output(void)
     if (virtualDevice == kAudioObjectUnknown) return false;
 
     AudioDeviceID defaultOutput = get_default_output_device();
-    return virtualDevice == defaultOutput;
+
+    // 如果默认输出是虚拟设备，或者默认输出是聚合设备（且该聚合设备包含虚拟设备）
+    if (defaultOutput == virtualDevice) return true;
+
+    if (aggregate_device_is_active())
+    {
+        return true;
+    }
+
+    return false;
 }
 
 bool virtual_device_is_active_input(void)
@@ -370,7 +384,7 @@ void virtual_device_print_status(void)
     printf("   UID: %s\n", info.uid);
     printf("\n");
 
-    // 检查输出状态
+    // 只检查输出状态
     if (virtual_device_is_active_output())
     {
         printf("✅ 虚拟设备是当前默认输出设备\n");
@@ -379,16 +393,6 @@ void virtual_device_print_status(void)
     {
         printf("⚠️  虚拟设备不是当前默认输出设备\n");
         printf("   使用 'audioctl use-virtual' 切换到虚拟设备\n");
-    }
-
-    // 检查输入状态
-    if (virtual_device_is_active_input())
-    {
-        printf("✅ 虚拟设备是当前默认输入设备\n");
-    }
-    else
-    {
-        printf("⚠️  虚拟设备不是当前默认输入设备\n");
     }
 
     printf("\n");
