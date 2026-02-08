@@ -33,10 +33,10 @@ BLUE='\e[0;34m'
 CYAN='\e[0;36m'
 NC='\e[0m'
 
-log_info() { printf "${BLUE}[信息]${NC} %s\n" "$1"; }
+log_info() { printf "${BLUE}[信息]${NC} %s\n" "$*"; }
 log_success() { printf "${GREEN}[成功]${NC} %s\n" "$1"; }
-log_warn() { printf "${YELLOW}[警告]${NC} %s\n" "$1"; }
-log_error() { printf "${RED}[错误]${NC} %s\n" "$1"; }
+log_warn() { printf "${YELLOW}[警告]${NC} %s\n" "$*"; }
+log_error() { printf "${RED}[错误]${NC} %s\n" "$*"; }
 log_step() { printf "\n${CYAN}========== %s ==========${NC}\n" "$1"; }
 
 check_not_root() {
@@ -87,20 +87,43 @@ coreaudio_stop_hard() {
 }
 
 coreaudio_wait_healthy() {
-  local timeout_sec="${1:-10}"
+  local timeout_sec="${1:-15}"
   local start
   start="$(date +%s)"
 
+  log_info "等待 Audio MIDI Setup 可查询设备列表..."
+  
   while true; do
-    if pgrep -x coreaudiod >/dev/null 2>&1; then
-      return 0
-    fi
     local now
     now="$(date +%s)"
-    if ((now - start >= timeout_sec)); then
+    local elapsed=$((now - start))
+    
+    if ((elapsed >= timeout_sec)); then
       return 1
     fi
-    sleep 0.2
+    
+    # 检查 coreaudiod 进程是否存在
+    if ! pgrep -x coreaudiod >/dev/null 2>&1; then
+      log_info "等待 coreaudiod 进程启动..."
+      sleep 1
+      continue
+    fi
+    
+    # [关键：检查 Audio MIDI Setup 是否能查出设备列表]
+    # 使用 system_profiler 查询音频设备，如果能成功执行且不超时，说明服务已就绪
+    local device_count
+    device_count="$(system_profiler SPAudioDataType 2>/dev/null | grep -c "Device:" || echo "0")"
+    
+    # 如果设备数量 >= 2（至少包含系统内置设备），认为 Audio MIDI Setup 已就绪
+    if ((device_count >= 2)); then
+      log_info "Audio MIDI Setup 已就绪（检测到 ${device_count} 个设备）"
+      # 再等待1秒确保完全稳定
+      sleep 1
+      return 0
+    fi
+    
+    log_info "等待设备列表初始化... (${elapsed}s/${timeout_sec}s)" || true
+    sleep 2
   done
 }
 
@@ -113,6 +136,41 @@ coreaudio_cpu_pct() {
     return 0
   fi
   echo "${v}" | awk '{printf "%d\n", ($1+0.5)}'
+}
+
+# [新增：检查虚拟设备是否出现在系统中]
+check_virtual_device_appears() {
+  local timeout_sec="${1:-10}"
+  local start
+  start="$(date +%s)"
+  
+  log_info "检查虚拟设备是否出现在系统中..."
+  
+  while true; do
+    # 使用 system_profiler 检查设备
+    if system_profiler SPAudioDataType 2>/dev/null | grep -qi "AudioCtl\|Virtual.*Audio"; then
+      log_success "虚拟设备已出现在系统中"
+      return 0
+    fi
+    
+    # 使用 audioctl 检查（如果可用）
+    if [[ -f "${BUILD_DIR}/bin/audioctl" ]]; then
+      if "${BUILD_DIR}/bin/audioctl" virtual-status 2>/dev/null | grep -q "已安装"; then
+        log_success "虚拟设备已出现在系统中"
+        return 0
+      fi
+    fi
+    
+    local now
+    now="$(date +%s)"
+    if ((now - start >= timeout_sec)); then
+      return 1
+    fi
+    
+    local elapsed=$((now - start))
+    log_info "等待虚拟设备出现... (${elapsed}s/${timeout_sec}s)"
+    sleep 2
+  done
 }
 
 coreaudio_watchdog_or_rollback() {
@@ -169,7 +227,19 @@ adhoc_sign_driver_if_needed() {
   fi
 
   log_info "对驱动进行 Ad-hoc 签名: ${DRIVER_PATH}"
-  sudo codesign --force --deep --sign - "${DRIVER_PATH}" >/dev/null 2>&1 || true
+  # [修改：签名失败不再忽略，确保签名成功]
+  if ! sudo codesign --force --deep --sign - "${DRIVER_PATH}"; then
+    log_error "驱动签名失败"
+    return 1
+  fi
+  
+  # [修改：验证签名]
+  log_info "验证驱动签名..."
+  if ! sudo codesign --verify --deep --strict "${DRIVER_PATH}"; then
+    log_error "驱动签名验证失败"
+    return 1
+  fi
+  log_success "驱动签名验证通过"
 }
 
 cmake_configure() {
@@ -212,13 +282,27 @@ install_driver() {
 
   log_success "驱动已安装: ${DRIVER_PATH}"
 
-  adhoc_sign_driver_if_needed
+  # [修改：签名失败时停止安装]
+  if ! adhoc_sign_driver_if_needed; then
+    log_error "驱动签名失败，停止安装"
+    exit 1
+  fi
+  
+  # [关键：安装驱动会触发 coreaudiod 重启，必须等待恢复]
+  log_info "驱动安装完成，等待 CoreAudio 恢复..."
+  if ! coreaudio_wait_healthy 20; then
+    log_warn "恢复超时，尝试强制重启..."
+    coreaudio_kickstart
+    sleep 5
+    if ! coreaudio_wait_healthy 15; then
+      log_error "CoreAudio 未能恢复，无法继续"
+      exit 1
+    fi
+  fi
+  log_success "CoreAudio 已恢复（安装驱动后）"
 }
 
 restart_coreaudio_safe() {
-  # [修改：新增 skip_stop 参数控制]
-  local skip_stop="${1:-false}"
-
   if [[ "${RESTART_COREAUDIO}" != "true" ]]; then
     log_warn "跳过重启 CoreAudio (--no-coreaudio-restart)。"
     return 0
@@ -229,29 +313,27 @@ restart_coreaudio_safe() {
   if [[ "${HARD_RESTART_COREAUDIO}" == "true" ]]; then
     log_warn "已启用强制重启。这可能会中断系统音频。"
     coreaudio_stop_hard
-  # [修改：仅当未在清理阶段停止过服务时，才执行软停止]
-  # Avoid killing the daemon twice in a short period to prevent launchd trashing
-  elif [[ "${skip_stop}" != "true" ]]; then
-    coreaudio_stop_soft
   else
-    log_info "CoreAudio 已在清理阶段停止，直接执行 Kickstart..."
+    coreaudio_stop_soft
   fi
 
   coreaudio_kickstart
 
-  log_info "等待 CoreAudio 恢复..."
-  if coreaudio_wait_healthy 12; then
-    log_success "CoreAudio 正在运行。"
-  else
-    log_warn "CoreAudio 未能及时恢复，正在重试 kickstart..."
+  # [关键：必须等待 Audio MIDI Setup 就绪才能继续]
+  log_info "等待 CoreAudio 恢复（等待设备完全初始化）..."
+  if ! coreaudio_wait_healthy 20; then
+    log_warn "第一次恢复超时，尝试强制重启..."
     coreaudio_kickstart
-    if coreaudio_wait_healthy 8; then
-      log_success "CoreAudio 正在运行。"
-    else
-      log_warn "CoreAudio 可能处于非健康状态。"
+    sleep 5
+    if ! coreaudio_wait_healthy 15; then
+      log_error "CoreAudio 未能恢复，无法继续安装"
+      exit 1
     fi
   fi
+  
+  log_success "CoreAudio 已稳定运行，设备列表已就绪"
 
+  # [修改：仅在成功恢复后才启动监控]
   coreaudio_watchdog_or_rollback
 }
 
@@ -345,27 +427,50 @@ cmd_install() {
 
   if [[ -d "${DRIVER_PATH}" ]]; then
     log_step "移除旧驱动"
-    # 尝试直接移除，如果失败（通常因为文件被占用）则停止服务后重试
-    if ! sudo rm -rf "${DRIVER_PATH}" 2>/dev/null; then
-      log_warn "驱动移除失败 (正在使用)。正在停止 CoreAudio 并重试..."
-
-      # [修改：此处停止后标记状态，避免后续重复停止]
-      coreaudio_stop_soft
-      coreaudio_stopped_during_cleanup="true"
-
-      sleep 1
-      if ! sudo rm -rf "${DRIVER_PATH}"; then
-        log_error "无法移除旧驱动，请检查权限或手动重启。"
+    
+    # [关键：移除驱动前记录状态，移除后必须等待恢复]
+    sudo rm -rf "${DRIVER_PATH}"
+    
+    # [关键：删除驱动文件会触发 coreaudiod 重启，必须等待恢复]
+    log_info "驱动已移除，等待 CoreAudio 恢复..."
+    if ! coreaudio_wait_healthy 20; then
+      log_warn "恢复超时，尝试强制重启..."
+      coreaudio_kickstart
+      sleep 5
+      if ! coreaudio_wait_healthy 15; then
+        log_error "CoreAudio 未能恢复，无法继续安装"
         exit 1
       fi
     fi
+    
+    log_success "CoreAudio 已恢复（移除驱动后）"
+    # [修改：标记为已恢复，让后续不再重复重启]
+    coreaudio_stopped_during_cleanup="true"
   fi
 
   install_driver
 
-  # [修改：根据之前的状态决定是否跳过停止动作]
-  # If we stopped it during cleanup, pass "true" to skip the redundant stop
-  restart_coreaudio_safe "${coreaudio_stopped_during_cleanup}"
+  # [修改：只在未重启过的情况下才重启]
+  if [[ "${coreaudio_stopped_during_cleanup}" != "true" ]]; then
+    restart_coreaudio_safe
+  else
+    log_info "已在清理阶段重启过 CoreAudio，跳过重复重启"
+  fi
+
+  # [新增：关键检查 - 验证设备是否出现]
+  log_step "验证虚拟设备"
+  if check_virtual_device_appears 15; then
+    log_success "虚拟设备验证通过"
+  else
+    log_error "虚拟设备未出现在系统中！"
+    log_info "可能原因："
+    log_info "  1. 驱动代码有错误导致初始化失败"
+    log_info "  2. 缺少必需的属性实现"
+    log_info "  3. 查看日志: log show --predicate 'process == \"coreaudiod\"' --last 2m"
+    log_info ""
+    log_info "建议：检查驱动日志后重新运行安装"
+    exit 1
+  fi
 
   if [[ "${run_tests}" == "true" ]]; then
     log_step "运行测试"
