@@ -1,304 +1,163 @@
 //
-// 驱动端应用音量控制实现
+// 驱动端应用音量控制 - 极简安全版（无共享内存）
 // Created by AhogeK on 02/05/26.
 //
+// 注意：此为简化版本，仅保留基础框架，确保驱动稳定运行
+// 高级功能（CLI 控制音量）后续通过更安全的方式实现
 
 #include "driver/app_volume_driver.h"
-#include "app_volume_control.h"
 #include <pthread.h>
-#include <sys/shm.h>
+#include <stdatomic.h>
 
-// 共享内存键（与app_volume_control.c中保持一致）
-#define APP_VOLUME_SHM_KEY 0x564F4C00  // "VOL" + 0x00
+// 简化的客户端条目
+typedef struct {
+    UInt32 clientID;
+    pid_t pid;
+    bool active;
+} SimpleClientEntry;
 
-// 全局管理器
-static ClientVolumeManager g_clientManager = {0};
+#define MAX_SIMPLE_CLIENTS 64
+
+static SimpleClientEntry g_clients[MAX_SIMPLE_CLIENTS];
+static atomic_int g_clientCount = 0;
+static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool g_initialized = false;
 
-// 共享内存
-static int g_shmId = -1;
-static AppVolumeList* g_shmVolumeList = NULL;
+// 默认音量表（简化：所有客户端默认音量 1.0，即无调节）
+// 后续可以通过 HAL 属性接口暴露控制点
+static Float32 g_defaultVolume = 1.0f;
 
 #pragma mark - 初始化和清理
 
 void app_volume_driver_init(void)
 {
-    if (g_initialized)
-    {
+    if (g_initialized) {
         return;
     }
 
-    memset(&g_clientManager, 0, sizeof(g_clientManager));
-    pthread_mutex_init(&g_clientManager.mutex, NULL);
-    g_clientManager.count = 0;
-
-    // 连接共享内存
-    g_shmId = shmget(APP_VOLUME_SHM_KEY, sizeof(AppVolumeList), 0666);
-    if (g_shmId >= 0)
-    {
-        g_shmVolumeList = (AppVolumeList*)shmat(g_shmId, NULL, 0);
-        if (g_shmVolumeList == (void*)-1)
-        {
-            g_shmVolumeList = NULL;
-        }
-    }
-
+    memset(g_clients, 0, sizeof(g_clients));
+    atomic_store(&g_clientCount, 0);
     g_initialized = true;
 }
 
 void app_volume_driver_cleanup(void)
 {
-    if (!g_initialized)
-    {
+    if (!g_initialized) {
         return;
     }
 
-    if (g_shmVolumeList != NULL)
-    {
-        shmdt(g_shmVolumeList);
-        g_shmVolumeList = NULL;
-    }
-
-    pthread_mutex_destroy(&g_clientManager.mutex);
-    memset(&g_clientManager, 0, sizeof(g_clientManager));
+    pthread_mutex_lock(&g_mutex);
+    memset(g_clients, 0, sizeof(g_clients));
+    atomic_store(&g_clientCount, 0);
+    pthread_mutex_unlock(&g_mutex);
 
     g_initialized = false;
-}
-
-#pragma mark - 内部辅助函数
-
-static ClientVolumeEntry* find_client_by_id(UInt32 clientID)
-{
-    for (UInt32 i = 0; i < g_clientManager.count; i++)
-    {
-        if (g_clientManager.entries[i].clientID == clientID)
-        {
-            return &g_clientManager.entries[i];
-        }
-    }
-    return NULL;
-}
-
-static ClientVolumeEntry* find_client_by_pid(pid_t pid)
-{
-    for (UInt32 i = 0; i < g_clientManager.count; i++)
-    {
-        if (g_clientManager.entries[i].pid == pid)
-        {
-            return &g_clientManager.entries[i];
-        }
-    }
-    return NULL;
 }
 
 #pragma mark - 客户端管理
 
 OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bundleId, const char* name)
 {
-    pthread_mutex_lock(&g_clientManager.mutex);
+    (void)bundleId;  // 暂时未使用
+    (void)name;      // 暂时未使用
+    
+    pthread_mutex_lock(&g_mutex);
 
     // 检查是否已存在
-    ClientVolumeEntry* entry = find_client_by_id(clientID);
-    if (entry != NULL)
-    {
-        // 更新现有条目
-        entry->pid = pid;
-        if (bundleId != NULL)
-        {
-            strncpy(entry->bundleId, bundleId, sizeof(entry->bundleId) - 1);
-            entry->bundleId[sizeof(entry->bundleId) - 1] = '\0';
-        }
-        if (name != NULL)
-        {
-            strncpy(entry->name, name, sizeof(entry->name) - 1);
-            entry->name[sizeof(entry->name) - 1] = '\0';
-        }
-        entry->isActive = true;
-        pthread_mutex_unlock(&g_clientManager.mutex);
-        return noErr;
-    }
-
-    // 检查PID是否已存在（可能ClientID变了）
-    entry = find_client_by_pid(pid);
-    if (entry != NULL)
-    {
-        entry->clientID = clientID;
-        if (bundleId != NULL)
-        {
-            strncpy(entry->bundleId, bundleId, sizeof(entry->bundleId) - 1);
-            entry->bundleId[sizeof(entry->bundleId) - 1] = '\0';
-        }
-        if (name != NULL)
-        {
-            strncpy(entry->name, name, sizeof(entry->name) - 1);
-            entry->name[sizeof(entry->name) - 1] = '\0';
-        }
-        entry->isActive = true;
-        pthread_mutex_unlock(&g_clientManager.mutex);
-        return noErr;
-    }
-
-    // 创建新条目
-    if (g_clientManager.count >= MAX_CLIENT_ENTRIES)
-    {
-        pthread_mutex_unlock(&g_clientManager.mutex);
-        return -1; // 列表已满
-    }
-
-    entry = &g_clientManager.entries[g_clientManager.count++];
-    memset(entry, 0, sizeof(ClientVolumeEntry));
-    entry->clientID = clientID;
-    entry->pid = pid;
-    if (bundleId != NULL)
-    {
-        strncpy(entry->bundleId, bundleId, sizeof(entry->bundleId) - 1);
-        entry->bundleId[sizeof(entry->bundleId) - 1] = '\0';
-    }
-    if (name != NULL)
-    {
-        strncpy(entry->name, name, sizeof(entry->name) - 1);
-        entry->name[sizeof(entry->name) - 1] = '\0';
-    }
-    entry->volume = 1.0f; // 默认音量 100%
-    entry->isMuted = false;
-    entry->isActive = true;
-
-    pthread_mutex_unlock(&g_clientManager.mutex);
-
-    return noErr;
-}
-
-OSStatus app_volume_driver_update_by_pid(pid_t pid, Float32 volume, bool isMuted)
-{
-    pthread_mutex_lock(&g_clientManager.mutex);
-
-    ClientVolumeEntry* entry = find_client_by_pid(pid);
-    if (entry != NULL)
-    {
-        entry->volume = volume;
-        entry->isMuted = isMuted;
-        pthread_mutex_unlock(&g_clientManager.mutex);
-        return noErr;
-    }
-
-    // 如果客户端还没注册，我们可以预先保存这个PID的音量设置吗？
-    // 为了简单起见，这里只处理已存在的客户端。
-    pthread_mutex_unlock(&g_clientManager.mutex);
-    return -1;
-}
-
-OSStatus app_volume_driver_remove_client(UInt32 clientID)
-{
-    pthread_mutex_lock(&g_clientManager.mutex);
-
-    for (UInt32 i = 0; i < g_clientManager.count; i++)
-    {
-        if (g_clientManager.entries[i].clientID == clientID)
-        {
-            // 移动后续条目
-            for (UInt32 j = i; j < g_clientManager.count - 1; j++)
-            {
-                g_clientManager.entries[j] = g_clientManager.entries[j + 1];
-            }
-            g_clientManager.count--;
-            memset(&g_clientManager.entries[g_clientManager.count], 0, sizeof(ClientVolumeEntry));
-
-            pthread_mutex_unlock(&g_clientManager.mutex);
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
+        if (g_clients[i].active && g_clients[i].clientID == clientID) {
+            g_clients[i].pid = pid;
+            pthread_mutex_unlock(&g_mutex);
             return noErr;
         }
     }
 
-    pthread_mutex_unlock(&g_clientManager.mutex);
-    return -1; // 客户端未找到
+    // 查找空槽
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
+        if (!g_clients[i].active) {
+            g_clients[i].clientID = clientID;
+            g_clients[i].pid = pid;
+            g_clients[i].active = true;
+            atomic_fetch_add(&g_clientCount, 1);
+            pthread_mutex_unlock(&g_mutex);
+            return noErr;
+        }
+    }
+
+    pthread_mutex_unlock(&g_mutex);
+    return kAudioHardwareBadDeviceError;  // 客户端列表已满
+}
+
+OSStatus app_volume_driver_remove_client(UInt32 clientID)
+{
+    pthread_mutex_lock(&g_mutex);
+
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
+        if (g_clients[i].active && g_clients[i].clientID == clientID) {
+            g_clients[i].active = false;
+            g_clients[i].clientID = 0;
+            g_clients[i].pid = 0;
+            atomic_fetch_sub(&g_clientCount, 1);
+            pthread_mutex_unlock(&g_mutex);
+            return noErr;
+        }
+    }
+
+    pthread_mutex_unlock(&g_mutex);
+    return kAudioHardwareBadDeviceError;  // 客户端未找到
 }
 
 pid_t app_volume_driver_get_pid(UInt32 clientID)
 {
-    pthread_mutex_lock(&g_clientManager.mutex);
-
-    const ClientVolumeEntry* entry = find_client_by_id(clientID);
-    pid_t pid = entry != NULL ? entry->pid : -1;
-
-    pthread_mutex_unlock(&g_clientManager.mutex);
-
-    return pid;
+    pid_t result = -1;
+    
+    pthread_mutex_lock(&g_mutex);
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
+        if (g_clients[i].active && g_clients[i].clientID == clientID) {
+            result = g_clients[i].pid;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_mutex);
+    
+    return result;
 }
 
 #pragma mark - 音量应用
 
 Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
 {
-    Float32 volume = 1.0f;
-    bool isMuted = false;
-
-    // 1. 获取 PID 并检查内部存储 (使用 TryLock)
-    pid_t pid = -1;
-    if (pthread_mutex_trylock(&g_clientManager.mutex) == 0)
-    {
-        const ClientVolumeEntry* entry = find_client_by_id(clientID);
-        if (entry != NULL)
-        {
-            pid = entry->pid;
-            volume = entry->volume;
-            isMuted = entry->isMuted;
-        }
-        pthread_mutex_unlock(&g_clientManager.mutex);
+    (void)clientID;  // 简化版本：不根据客户端区分音量
+    
+    if (outIsMuted != NULL) {
+        *outIsMuted = false;
     }
-    else
-    {
-        // 如果获取锁失败，直接返回默认值，避免阻塞 IO 线程
-        if (outIsMuted != NULL) *outIsMuted = false;
-        return 1.0f;
-    }
-
-    // 2. 从共享内存同步音量 (如果有 PID)
-    if (pid < 0 || g_shmVolumeList == NULL || pthread_mutex_trylock(&g_shmVolumeList->mutex) != 0)
-    {
-        if (outIsMuted != NULL) *outIsMuted = isMuted;
-        return isMuted ? 0.0f : volume;
-    }
-
-    for (UInt32 i = 0; i < g_shmVolumeList->count; i++)
-    {
-        if (g_shmVolumeList->entries[i].pid == pid)
-        {
-            volume = g_shmVolumeList->entries[i].volume;
-            isMuted = g_shmVolumeList->entries[i].isMuted;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&g_shmVolumeList->mutex);
-
-    if (outIsMuted != NULL)
-    {
-        *outIsMuted = isMuted;
-    }
-
-    return isMuted ? 0.0f : volume;
+    
+    // 简化版本：返回默认音量 1.0（即不调节）
+    // 后续可以通过自定义 HAL 属性来控制
+    return g_defaultVolume;
 }
 
 void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameCount, UInt32 channels)
 {
-    if (buffer == NULL || frameCount == 0)
-    {
+    (void)clientID;
+    
+    if (buffer == NULL || frameCount == 0) {
         return;
     }
 
-    // 获取该客户端的音量
-    Float32 volume = app_volume_driver_get_volume(clientID, NULL);
-
+    Float32 volume = g_defaultVolume;
+    
     // 如果音量是100%，不需要处理
-    if (volume >= 1.0f)
-    {
+    if (volume >= 0.999f) {
         return;
     }
 
-    // 应用音量到音频缓冲区 (32位浮点格式)
+    // 应用音量到音频缓冲区
     Float32* samples = (Float32*)buffer;
     UInt32 totalSamples = frameCount * channels;
 
-    for (UInt32 i = 0; i < totalSamples; i++)
-    {
+    for (UInt32 i = 0; i < totalSamples; i++) {
         samples[i] *= volume;
     }
 }

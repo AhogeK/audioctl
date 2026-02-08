@@ -84,8 +84,17 @@ set_target_properties(virtual_audio_driver PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION "driver"
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/resource/Info.plist"
+        # 强制指定关键元数据，防止 CMake 自动生成默认值覆盖 Info.plist
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.ahogek.VirtualAudioDriver"
+        MACOSX_BUNDLE_BUNDLE_NAME "VirtualAudioDriver"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1"
         LIBRARY_OUTPUT_DIRECTORY "${PLUGIN_OUTPUT_DIR}"
         OUTPUT_NAME "${DRIVER_OUTPUT_NAME}"
+        # [修改：仅保留符号导出，移除 sectcreate 避免双写元数据]
+        LINK_FLAGS "-Wl,-exported_symbol,_AudioServerPlugIn_Initialize"
+        # [修改：构建 arm64e 架构以支持指针认证，符合现代 macOS HAL 插件要求]
+        OSX_ARCHITECTURES "arm64e"
 )
 
 # 链接驱动插件需要的框架

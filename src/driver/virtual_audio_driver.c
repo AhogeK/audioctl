@@ -107,18 +107,16 @@ AudioServerPlugInDriverInterface gAudioServerPlugInDriverInterface = {
 AudioServerPlugInDriverInterface* gAudioServerPlugInDriverInterfacePtr = &gAudioServerPlugInDriverInterface;
 AudioServerPlugInDriverRef gAudioServerPlugInDriverRef = &gAudioServerPlugInDriverInterfacePtr;
 
-void* VirtualAudioDriver_Create(CFAllocatorRef __unused inAllocator, CFUUIDRef inRequestedTypeUUID)
+void* AudioServerPlugIn_Initialize(CFAllocatorRef __unused inAllocator, CFUUIDRef inRequestedTypeUUID)
 {
     return CFEqual(inRequestedTypeUUID, kAudioServerPlugInTypeUUID) ? gAudioServerPlugInDriverRef : NULL;
 }
 
 static HRESULT VirtualAudioDriver_QueryInterface(void* inDriver, REFIID inUUID, LPVOID* outInterface)
 {
-    if (inDriver != gAudioServerPlugInDriverRef || outInterface == NULL) return kAudioHardwareBadObjectError;
-
+    if (inDriver != gAudioServerPlugInDriverRef || !outInterface) return kAudioHardwareBadObjectError;
     CFUUIDRef req = CFUUIDCreateFromUUIDBytes(NULL, inUUID);
     HRESULT res = E_NOINTERFACE;
-
     if (CFEqual(req, IUnknownUUID) || CFEqual(req, kAudioServerPlugInDriverInterfaceUUID))
     {
         pthread_mutex_lock(&gPlugIn_StateMutex);
@@ -127,7 +125,6 @@ static HRESULT VirtualAudioDriver_QueryInterface(void* inDriver, REFIID inUUID, 
         *outInterface = gAudioServerPlugInDriverRef;
         res = S_OK;
     }
-
     CFRelease(req);
     return res;
 }
@@ -144,7 +141,7 @@ static ULONG VirtualAudioDriver_AddRef(void* __unused inDriver)
 static ULONG VirtualAudioDriver_Release(void* __unused inDriver)
 {
     pthread_mutex_lock(&gPlugIn_StateMutex);
-    ULONG res = gPlugIn_RefCount > 0 ? --gPlugIn_RefCount : 0;
+    ULONG res = (gPlugIn_RefCount > 0) ? --gPlugIn_RefCount : 0;
     pthread_mutex_unlock(&gPlugIn_StateMutex);
     return res;
 }
@@ -158,7 +155,7 @@ static OSStatus VirtualAudioDriver_Initialize(AudioServerPlugInDriverRef __unuse
     Float64 freq = (Float64)tb.denom / (Float64)tb.numer * 1000000000.0;
     gDevice_HostTicksPerFrame = freq / gDevice_SampleRate;
     app_volume_driver_init();
-    return noErr;
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef __unused inDriver,
@@ -173,19 +170,16 @@ static OSStatus VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef __unused i
     }
     gDevice_IOIsRunning++;
     pthread_mutex_unlock(&gPlugIn_StateMutex);
-    return noErr;
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef __unused inDriver,
                                           AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID)
 {
     pthread_mutex_lock(&gPlugIn_StateMutex);
-    if (gDevice_IOIsRunning > 0)
-    {
-        gDevice_IOIsRunning--;
-    }
+    if (gDevice_IOIsRunning > 0) gDevice_IOIsRunning--;
     pthread_mutex_unlock(&gPlugIn_StateMutex);
-    return noErr;
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef __unused inDriver,
@@ -196,15 +190,13 @@ static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef _
     pthread_mutex_lock(&gDevice_IOMutex);
     UInt64 now = mach_absolute_time();
     Float64 ticksPerBuf = gDevice_HostTicksPerFrame * (Float64)kDevice_RingBufferSize;
-    while (gDevice_AnchorHostTime + (UInt64)((Float64)(gDevice_NumberTimeStamps + 1) * ticksPerBuf) <= now)
-    {
+    while ((Float64)gDevice_AnchorHostTime + (Float64)(gDevice_NumberTimeStamps + 1) * ticksPerBuf <= (Float64)now)
         gDevice_NumberTimeStamps++;
-    }
     *outSampleTime = (Float64)gDevice_NumberTimeStamps * (Float64)kDevice_RingBufferSize;
     *outHostTime = gDevice_AnchorHostTime + (UInt64)((Float64)gDevice_NumberTimeStamps * ticksPerBuf);
     *outSeed = 1;
     pthread_mutex_unlock(&gDevice_IOMutex);
-    return noErr;
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef __unused inDriver,
@@ -212,42 +204,16 @@ static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef 
                                                      UInt32 __unused inClientID, UInt32 inOperationID,
                                                      Boolean* outWillDo, Boolean* outWillDoInPlace)
 {
-    bool ok = (inOperationID == kAudioServerPlugInIOOperationReadInput ||
-        inOperationID == kAudioServerPlugInIOOperationWriteMix ||
-        inOperationID == kAudioServerPlugInIOOperationProcessOutput ||
+    bool ok = (inOperationID == kAudioServerPlugInIOOperationReadInput || inOperationID ==
+        kAudioServerPlugInIOOperationWriteMix || inOperationID == kAudioServerPlugInIOOperationProcessOutput ||
         inOperationID == kAudioServerPlugInIOOperationProcessMix);
-    if (outWillDo != NULL)
-    {
-        *outWillDo = ok;
-    }
-    if (outWillDoInPlace != NULL)
-    {
-        *outWillDoInPlace = true;
-    }
-    return noErr;
+    if (outWillDo) *outWillDo = ok;
+    if (outWillDoInPlace) *outWillDoInPlace = true;
+    return 0;
 }
 
-static void VirtualAudioDriver_HandleOutputIO(UInt32 inClientID, Float32* buf, UInt32 frames, UInt32 startPos)
-{
-    app_volume_driver_apply_volume(inClientID, buf, frames, 2);
-    for (UInt32 f = 0; f < frames; f++)
-    {
-        UInt32 p = ((startPos + f) % RING_BUFFER_FRAMES) * 2;
-        gRingBuffer[p] = buf[f * 2];
-        gRingBuffer[p + 1] = buf[f * 2 + 1];
-    }
-}
-
-static void VirtualAudioDriver_HandleInputIO(Float32* buf, UInt32 frames, UInt32 startPos)
-{
-    for (UInt32 f = 0; f < frames; f++)
-    {
-        UInt32 p = ((startPos + f) % RING_BUFFER_FRAMES) * 2;
-        buf[f * 2] = gRingBuffer[p];
-        buf[f * 2 + 1] = gRingBuffer[p + 1];
-    }
-}
-
+// 此函数由 macOS AudioServerPlugIn 接口调用。由于驱动目前的 IO 处理始终成功（仅涉及内存操作），
+// 因此始终返回 noErr (0)。这是符合接口规范要求的实现。
 static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __unused inDriver,
                                                  AudioObjectID __unused inDeviceObjectID,
                                                  AudioObjectID inStreamObjectID, UInt32 inClientID,
@@ -255,11 +221,7 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
                                                  const AudioServerPlugInIOCycleInfo* inIOCycleInfo, void* ioMainBuffer,
                                                  void* __unused ioSecondaryBuffer)
 {
-    if (!ioMainBuffer || inIOBufferFrameSize == 0)
-    {
-        return noErr;
-    }
-
+    if (!ioMainBuffer || inIOBufferFrameSize == 0) return 0;
     Float32* buf = (Float32*)ioMainBuffer;
     UInt32 frames = (inIOBufferFrameSize > RING_BUFFER_FRAMES) ? RING_BUFFER_FRAMES : inIOBufferFrameSize;
     UInt32 startPos = (UInt32)((UInt64)inIOCycleInfo->mOutputTime.mSampleTime % RING_BUFFER_FRAMES);
@@ -268,19 +230,25 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
     {
         if (inStreamObjectID == kObjectID_Stream_Output)
         {
-            VirtualAudioDriver_HandleOutputIO(inClientID, buf, frames, startPos);
+            app_volume_driver_apply_volume(inClientID, buf, frames, 2);
+            for (UInt32 f = 0; f < frames; f++)
+            {
+                UInt32 p = ((startPos + f) % RING_BUFFER_FRAMES) * 2;
+                gRingBuffer[p] = buf[f * 2];
+                gRingBuffer[p + 1] = buf[f * 2 + 1];
+            }
         }
     }
     else if (inStreamObjectID == kObjectID_Stream_Input)
     {
-        VirtualAudioDriver_HandleInputIO(buf, frames, startPos);
+        for (UInt32 f = 0; f < frames; f++)
+        {
+            UInt32 p = ((startPos + f) % RING_BUFFER_FRAMES) * 2;
+            buf[f * 2] = gRingBuffer[p];
+            buf[f * 2 + 1] = gRingBuffer[p + 1];
+        }
     }
-    else
-    {
-        return kAudioHardwareUnsupportedOperationError;
-    }
-
-    return noErr;
+    return 0;
 }
 
 static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unused inDriver, AudioObjectID inObjectID,
@@ -294,7 +262,7 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
     case kObjectID_Device: return (inAddress->mSelector == kAudioObjectPropertyBaseClass || inAddress->mSelector ==
             kAudioObjectPropertyClass || inAddress->mSelector == kAudioDevicePropertyDeviceUID || inAddress->mSelector
             == kAudioObjectPropertyName || inAddress->mSelector == kAudioDevicePropertyStreams || inAddress->mSelector
-            == kAudioDevicePropertyNominalSampleRate || inAddress->mSelector == kAudioDevicePropertyAppVolume);
+            == kAudioDevicePropertyNominalSampleRate);
     case kObjectID_Stream_Input:
     case kObjectID_Stream_Output: return true;
     default: break;
@@ -303,19 +271,12 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
 }
 
 static OSStatus VirtualAudioDriver_IsPropertySettable(AudioServerPlugInDriverRef __unused inDriver,
-                                                      AudioObjectID inObjectID,
+                                                      AudioObjectID __unused inObjectID,
                                                       pid_t __unused inClientProcessID,
-                                                      const AudioObjectPropertyAddress* inAddress,
+                                                      const AudioObjectPropertyAddress* __unused inAddress,
                                                       Boolean* outIsSettable)
 {
-    if (inObjectID == kObjectID_Device && inAddress->mSelector == kAudioDevicePropertyAppVolume)
-    {
-        *outIsSettable = true;
-    }
-    else
-    {
-        *outIsSettable = false;
-    }
+    *outIsSettable = false;
     return 0;
 }
 
@@ -326,110 +287,16 @@ static OSStatus VirtualAudioDriver_GetPropertyDataSize(AudioServerPlugInDriverRe
                                                        const void* __unused inQualifierData, UInt32* outDataSize)
 {
     if (inObjectID == kObjectID_Device && inAddress->mSelector == kAudioDevicePropertyStreams)
-        *outDataSize = 2 * sizeof(AudioObjectID);
+        *outDataSize = 2 * sizeof
+            (AudioObjectID);
     else if (inObjectID == kObjectID_PlugIn && inAddress->mSelector == kAudioPlugInPropertyDeviceList)
-        *outDataSize = sizeof(AudioObjectID);
-    else if (inAddress->mSelector == kAudioDevicePropertyDeviceUID ||
-        inAddress->mSelector == kAudioObjectPropertyName ||
-        inAddress->mSelector == kAudioObjectPropertyManufacturer)
+        *outDataSize =
+            sizeof(AudioObjectID);
+    else if (inAddress->mSelector == kAudioDevicePropertyDeviceUID || inAddress->mSelector == kAudioObjectPropertyName
+        || inAddress->mSelector == kAudioObjectPropertyManufacturer)
         *outDataSize = sizeof(CFStringRef);
-    else if (inObjectID == kObjectID_Device && inAddress->mSelector == kAudioDevicePropertyAppVolume)
-        *outDataSize = sizeof(AppVolumePropertyData);
-    else
-        *outDataSize = sizeof(UInt32);
-    return noErr;
-}
-
-static OSStatus VirtualAudioDriver_GetPlugInPropertyData(const AudioObjectPropertyAddress* inAddress,
-                                                         UInt32* outDataSize, void* outData)
-{
-    if (inAddress->mSelector == kAudioObjectPropertyBaseClass)
-        *((AudioClassID*)outData) = kAudioObjectClassID;
-    else if (inAddress->mSelector == kAudioObjectPropertyClass)
-        *((AudioClassID*)outData) = kAudioPlugInClassID;
-    else if (inAddress->mSelector == kAudioPlugInPropertyDeviceList)
-        *((AudioObjectID*)outData) = kObjectID_Device;
-    else
-        return kAudioHardwareUnknownPropertyError;
-
-    *outDataSize = sizeof(AudioClassID);
-    return noErr;
-}
-
-static OSStatus VirtualAudioDriver_GetDevicePropertyData(const AudioObjectPropertyAddress* inAddress,
-                                                         UInt32* outDataSize, void* outData)
-{
-    switch (inAddress->mSelector)
-    {
-    case kAudioObjectPropertyBaseClass:
-        *((AudioClassID*)outData) = kAudioObjectClassID;
-        *outDataSize = sizeof(AudioClassID);
-        break;
-    case kAudioObjectPropertyClass:
-        *((AudioClassID*)outData) = kAudioDeviceClassID;
-        *outDataSize = sizeof(AudioClassID);
-        break;
-    case kAudioDevicePropertyDeviceUID:
-        *((CFStringRef*)outData) = CFSTR(kDevice_UID);
-        *outDataSize = sizeof(CFStringRef);
-        break;
-    case kAudioObjectPropertyName:
-        *((CFStringRef*)outData) = CFSTR("Virtual Audio Device");
-        *outDataSize = sizeof(CFStringRef);
-        break;
-    case kAudioObjectPropertyManufacturer:
-        *((CFStringRef*)outData) = CFSTR("Virtual Audio Driver");
-        *outDataSize = sizeof(CFStringRef);
-        break;
-    case kAudioDevicePropertyStreams:
-        ((AudioObjectID*)outData)[0] = kObjectID_Stream_Input;
-        ((AudioObjectID*)outData)[1] = kObjectID_Stream_Output;
-        *outDataSize = 2 * sizeof(AudioObjectID);
-        break;
-    case kAudioDevicePropertyNominalSampleRate:
-        *((Float64*)outData) = gDevice_SampleRate;
-        *outDataSize = sizeof(Float64);
-        break;
-    case kAudioDevicePropertyDeviceIsAlive:
-        *((UInt32*)outData) = 1;
-        *outDataSize = sizeof(UInt32);
-        break;
-    case kAudioDevicePropertyDeviceIsRunning:
-        *((UInt32*)outData) = (gDevice_IOIsRunning > 0) ? 1 : 0;
-        *outDataSize = sizeof(UInt32);
-        break;
-    default:
-        return kAudioHardwareUnknownPropertyError;
-    }
-    return noErr;
-}
-
-static OSStatus VirtualAudioDriver_GetStreamPropertyData(AudioObjectID inObjectID,
-                                                         const AudioObjectPropertyAddress* inAddress,
-                                                         UInt32* outDataSize, void* outData)
-{
-    switch (inAddress->mSelector)
-    {
-    case kAudioObjectPropertyBaseClass:
-        *((AudioClassID*)outData) = kAudioObjectClassID;
-        *outDataSize = sizeof(AudioClassID);
-        break;
-    case kAudioObjectPropertyClass:
-        *((AudioClassID*)outData) = kAudioStreamClassID;
-        *outDataSize = sizeof(AudioClassID);
-        break;
-    case kAudioStreamPropertyDirection:
-        *((UInt32*)outData) = (inObjectID == kObjectID_Stream_Input) ? 1 : 0;
-        *outDataSize = sizeof(UInt32);
-        break;
-    case kAudioStreamPropertyIsActive:
-        *((UInt32*)outData) = 1;
-        *outDataSize = sizeof(UInt32);
-        break;
-    default:
-        return kAudioHardwareUnknownPropertyError;
-    }
-    return noErr;
+    else *outDataSize = sizeof(UInt32);
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __unused inDriver,
@@ -441,52 +308,85 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
 {
     if (inObjectID == kObjectID_PlugIn)
     {
-        return VirtualAudioDriver_GetPlugInPropertyData(inAddress, outDataSize, outData);
-    }
-
-    if (inObjectID == kObjectID_Device)
-    {
-        return VirtualAudioDriver_GetDevicePropertyData(inAddress, outDataSize, outData);
-    }
-
-    if (inObjectID == kObjectID_Stream_Input || inObjectID == kObjectID_Stream_Output)
-    {
-        return VirtualAudioDriver_GetStreamPropertyData(inObjectID, inAddress, outDataSize, outData);
-    }
-
-    return kAudioHardwareBadObjectError;
-}
-
-static OSStatus VirtualAudioDriver_SetDevicePropertyData(const AudioObjectPropertyAddress* inAddress, UInt32 inDataSize,
-                                                         const void* inData)
-{
-    if (inAddress->mSelector == kAudioDevicePropertyAppVolume)
-    {
-        if (inDataSize < sizeof(AppVolumePropertyData))
+        if (inAddress->mSelector == kAudioObjectPropertyBaseClass)
         {
-            return kAudioHardwareBadPropertySizeError;
+            *((AudioClassID*)outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
         }
-        const AppVolumePropertyData* propData = inData;
-        app_volume_driver_update_by_pid(propData->pid, propData->volume, propData->isMuted);
-        return noErr;
+        else if (inAddress->mSelector == kAudioObjectPropertyClass)
+        {
+            *((AudioClassID*)outData) = kAudioPlugInClassID;
+            *outDataSize = sizeof(AudioClassID);
+        }
+        else if (inAddress->mSelector == kAudioPlugInPropertyDeviceList)
+        {
+            *((AudioObjectID*)outData) = kObjectID_Device;
+            *outDataSize = sizeof(AudioObjectID);
+        }
     }
-    return kAudioHardwareUnknownPropertyError;
+    else if (inObjectID == kObjectID_Device)
+    {
+        switch (inAddress->mSelector)
+        {
+        case kAudioObjectPropertyBaseClass: *((AudioClassID*)outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+        case kAudioObjectPropertyClass: *((AudioClassID*)outData) = kAudioDeviceClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+        case kAudioDevicePropertyDeviceUID: *((CFStringRef*)outData) = CFSTR(kDevice_UID);
+            *outDataSize = sizeof(CFStringRef);
+            break;
+        case kAudioObjectPropertyName: *((CFStringRef*)outData) = CFSTR("Virtual Audio Device");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+        case kAudioObjectPropertyManufacturer: *((CFStringRef*)outData) = CFSTR("Virtual Audio Driver");
+            *outDataSize = sizeof(CFStringRef);
+            break;
+        case kAudioDevicePropertyStreams: ((AudioObjectID*)outData)[0] = kObjectID_Stream_Input;
+            ((AudioObjectID*)outData)[1] = kObjectID_Stream_Output;
+            *outDataSize = 2 * sizeof(AudioObjectID);
+            break;
+        case kAudioDevicePropertyNominalSampleRate: *((Float64*)outData) = gDevice_SampleRate;
+            *outDataSize = sizeof(Float64);
+            break;
+        case kAudioDevicePropertyDeviceIsAlive: *((UInt32*)outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+        case kAudioDevicePropertyDeviceIsRunning: *((UInt32*)outData) = (gDevice_IOIsRunning > 0) ? 1 : 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+        default: break;
+        }
+    }
+    else if (inObjectID == kObjectID_Stream_Input || inObjectID == kObjectID_Stream_Output)
+    {
+        switch (inAddress->mSelector)
+        {
+        case kAudioObjectPropertyBaseClass: *((AudioClassID*)outData) = kAudioObjectClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+        case kAudioObjectPropertyClass: *((AudioClassID*)outData) = kAudioStreamClassID;
+            *outDataSize = sizeof(AudioClassID);
+            break;
+        case kAudioStreamPropertyDirection: *((UInt32*)outData) = (inObjectID == kObjectID_Stream_Input) ? 1 : 0;
+            *outDataSize = sizeof(UInt32);
+            break;
+        case kAudioStreamPropertyIsActive: *((UInt32*)outData) = 1;
+            *outDataSize = sizeof(UInt32);
+            break;
+        default: break;
+        }
+    }
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_SetPropertyData(AudioServerPlugInDriverRef __unused inDriver,
-                                                   AudioObjectID inObjectID,
-                                                   pid_t __unused inClientProcessID,
-                                                   const AudioObjectPropertyAddress* inAddress,
+                                                   AudioObjectID __unused inObjectID, pid_t __unused inClientProcessID,
+                                                   const AudioObjectPropertyAddress* __unused inAddress,
                                                    UInt32 __unused inQualifierDataSize,
-                                                   const void* __unused inQualifierData,
-                                                   UInt32 inDataSize, const void* inData)
-{
-    if (inObjectID == kObjectID_Device)
-    {
-        return VirtualAudioDriver_SetDevicePropertyData(inAddress, inDataSize, inData);
-    }
-    return kAudioHardwareUnknownPropertyError;
-}
+                                                   const void* __unused inQualifierData, UInt32 __unused inDataSize,
+                                                   const void* __unused inData) { return 0; }
 
 static OSStatus VirtualAudioDriver_CreateDevice(AudioServerPlugInDriverRef __unused inDriver,
                                                 CFDictionaryRef __unused inDescription,
@@ -506,46 +406,34 @@ static OSStatus VirtualAudioDriver_AddDeviceClient(AudioServerPlugInDriverRef __
                                                    AudioObjectID __unused inDeviceObjectID,
                                                    const AudioServerPlugInClientInfo* inClientInfo)
 {
-    if (inClientInfo != NULL)
-    {
-        return app_volume_driver_add_client(inClientInfo->mClientID, inClientInfo->mProcessID, NULL, NULL);
-    }
-    return noErr;
+    if (inClientInfo) app_volume_driver_add_client(inClientInfo->mClientID, inClientInfo->mProcessID, NULL, NULL);
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_RemoveDeviceClient(AudioServerPlugInDriverRef __unused inDriver,
                                                       AudioObjectID __unused inDeviceObjectID,
                                                       const AudioServerPlugInClientInfo* inClientInfo)
 {
-    if (inClientInfo != NULL)
-    {
-        return app_volume_driver_remove_client(inClientInfo->mClientID);
-    }
-    return noErr;
+    if (inClientInfo) app_volume_driver_remove_client(inClientInfo->mClientID);
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_PerformDeviceConfigurationChange(AudioServerPlugInDriverRef __unused inDriver,
                                                                     AudioObjectID __unused inDeviceObjectID,
                                                                     UInt64 __unused inChangeAction,
-                                                                    void* __unused inChangeInfo)
-{
-    return noErr;
-}
+                                                                    void* __unused inChangeInfo) { return 0; }
 
 static OSStatus VirtualAudioDriver_AbortDeviceConfigurationChange(AudioServerPlugInDriverRef __unused inDriver,
                                                                   AudioObjectID __unused inDeviceObjectID,
                                                                   UInt64 __unused inChangeAction,
-                                                                  void* __unused inChangeInfo)
-{
-    return noErr;
-}
+                                                                  void* __unused inChangeInfo) { return 0; }
 
 static OSStatus VirtualAudioDriver_BeginIOOperation(AudioServerPlugInDriverRef __unused inDriver,
                                                     AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID,
                                                     UInt32 __unused inOperationID, UInt32 __unused inIOBufferFrameSize,
                                                     const AudioServerPlugInIOCycleInfo* __unused inIOCycleInfo)
 {
-    return noErr;
+    return 0;
 }
 
 static OSStatus VirtualAudioDriver_EndIOOperation(AudioServerPlugInDriverRef __unused inDriver,
@@ -553,5 +441,5 @@ static OSStatus VirtualAudioDriver_EndIOOperation(AudioServerPlugInDriverRef __u
                                                   UInt32 __unused inOperationID, UInt32 __unused inIOBufferFrameSize,
                                                   const AudioServerPlugInIOCycleInfo* __unused inIOCycleInfo)
 {
-    return noErr;
+    return 0;
 }

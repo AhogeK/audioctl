@@ -36,7 +36,7 @@ typedef struct
 #pragma mark - 初始化和清理
 
 // 初始化应用音量控制系统
-void app_volume_control_init(void);
+OSStatus app_volume_control_init(void);
 
 // 清理应用音量控制系统
 void app_volume_control_cleanup(void);
@@ -69,7 +69,7 @@ OSStatus app_volume_set_active(pid_t pid, bool active);
 #pragma mark - 查询
 
 // 获取所有应用音量信息
-OSStatus app_volume_get_all(AppVolumeInfo * *outApps, UInt32 * outCount);
+OSStatus app_volume_get_all(AppVolumeInfo* * outApps, UInt32* outCount);
 
 // 释放应用音量信息列表
 void app_volume_free_list(AppVolumeInfo* apps);
