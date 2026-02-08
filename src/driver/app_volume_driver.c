@@ -10,7 +10,8 @@
 #include <stdatomic.h>
 
 // 简化的客户端条目
-typedef struct {
+typedef struct
+{
     UInt32 clientID;
     pid_t pid;
     bool active;
@@ -31,7 +32,8 @@ static Float32 g_defaultVolume = 1.0f;
 
 void app_volume_driver_init(void)
 {
-    if (g_initialized) {
+    if (g_initialized)
+    {
         return;
     }
 
@@ -42,7 +44,8 @@ void app_volume_driver_init(void)
 
 void app_volume_driver_cleanup(void)
 {
-    if (!g_initialized) {
+    if (!g_initialized)
+    {
         return;
     }
 
@@ -58,14 +61,16 @@ void app_volume_driver_cleanup(void)
 
 OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bundleId, const char* name)
 {
-    (void)bundleId;  // 暂时未使用
-    (void)name;      // 暂时未使用
-    
+    (void)bundleId; // 暂时未使用
+    (void)name; // 暂时未使用
+
     pthread_mutex_lock(&g_mutex);
 
     // 检查是否已存在
-    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
-        if (g_clients[i].active && g_clients[i].clientID == clientID) {
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++)
+    {
+        if (g_clients[i].active && g_clients[i].clientID == clientID)
+        {
             g_clients[i].pid = pid;
             pthread_mutex_unlock(&g_mutex);
             return noErr;
@@ -73,8 +78,10 @@ OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bu
     }
 
     // 查找空槽
-    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
-        if (!g_clients[i].active) {
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++)
+    {
+        if (!g_clients[i].active)
+        {
             g_clients[i].clientID = clientID;
             g_clients[i].pid = pid;
             g_clients[i].active = true;
@@ -92,8 +99,10 @@ OSStatus app_volume_driver_remove_client(UInt32 clientID)
 {
     pthread_mutex_lock(&g_mutex);
 
-    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
-        if (g_clients[i].active && g_clients[i].clientID == clientID) {
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++)
+    {
+        if (g_clients[i].active && g_clients[i].clientID == clientID)
+        {
             g_clients[i].active = false;
             g_clients[i].clientID = 0;
             g_clients[i].pid = 0;
@@ -110,10 +119,12 @@ OSStatus app_volume_driver_remove_client(UInt32 clientID)
 pid_t app_volume_driver_get_pid(UInt32 clientID)
 {
     pid_t result = -1;
-    
+
     pthread_mutex_lock(&g_mutex);
-    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++) {
-        if (g_clients[i].active && g_clients[i].clientID == clientID) {
+    for (int i = 0; i < MAX_SIMPLE_CLIENTS; i++)
+    {
+        if (g_clients[i].active && g_clients[i].clientID == clientID)
+        {
             result = g_clients[i].pid;
             break;
         }
@@ -127,12 +138,13 @@ pid_t app_volume_driver_get_pid(UInt32 clientID)
 
 Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
 {
-    (void)clientID;  // 简化版本：不根据客户端区分音量
-    
-    if (outIsMuted != NULL) {
+    (void)clientID; // 简化版本：不根据客户端区分音量
+
+    if (outIsMuted != NULL)
+    {
         *outIsMuted = false;
     }
-    
+
     // 简化版本：返回默认音量 1.0（即不调节）
     // 后续可以通过自定义 HAL 属性来控制
     return g_defaultVolume;
@@ -141,15 +153,17 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
 void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameCount, UInt32 channels)
 {
     (void)clientID;
-    
-    if (buffer == NULL || frameCount == 0) {
+
+    if (buffer == NULL || frameCount == 0)
+    {
         return;
     }
 
     Float32 volume = g_defaultVolume;
-    
+
     // 如果音量是100%，不需要处理
-    if (volume >= 0.999f) {
+    if (volume >= 0.999f)
+    {
         return;
     }
 
