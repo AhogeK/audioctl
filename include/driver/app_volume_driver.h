@@ -20,8 +20,21 @@ typedef struct
     pid_t pid; // 进程ID
     char bundleId[256]; // Bundle ID
     char name[256]; // 应用名称
+    Float32 volume; // 当前音量
+    bool isMuted; // 是否静音
     bool isActive; // 是否活跃
 } ClientVolumeEntry;
+
+// 自定义属性用于应用音量控制
+#define kAudioDevicePropertyAppVolume 0x61766F6C // 'avol'
+
+// 应用音量属性数据结构
+typedef struct
+{
+    pid_t pid;
+    Float32 volume;
+    bool isMuted;
+} AppVolumePropertyData;
 
 // 客户端音量管理器
 typedef struct
@@ -34,7 +47,7 @@ typedef struct
 #pragma mark - 初始化和清理
 
 // 初始化客户端音量管理器
-OSStatus app_volume_driver_init(void);
+void app_volume_driver_init(void);
 
 // 清理客户端音量管理器
 void app_volume_driver_cleanup(void);
@@ -46,6 +59,9 @@ OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bu
 
 // 移除客户端
 OSStatus app_volume_driver_remove_client(UInt32 clientID);
+
+// 更新指定 PID 的音量
+OSStatus app_volume_driver_update_by_pid(pid_t pid, Float32 volume, bool isMuted);
 
 // 根据ClientID查找PID
 pid_t app_volume_driver_get_pid(UInt32 clientID);

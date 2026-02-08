@@ -4,7 +4,6 @@
 
 #include "driver/virtual_audio_device.h"
 #include <stdio.h>
-#include <string.h>
 #include <math.h>
 
 // 用于浮点数比较的误差范围
@@ -42,7 +41,13 @@ static int test_basic_output_processing()
     // 创建测试音频缓冲区
     const UInt32 frameCount = 64;
     const UInt32 channelCount = 2;
-    Float32 testData[frameCount * channelCount];
+    Float32* testData = (Float32*)malloc(frameCount * channelCount * sizeof(Float32));
+    if (testData == NULL)
+    {
+        printf("FAIL: Memory allocation failed\n");
+        virtual_device_destroy(device);
+        return 1;
+    }
 
     // 填充测试数据
     for (UInt32 i = 0; i < frameCount * channelCount; i++)
@@ -66,6 +71,7 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareIllegalOperationError)
     {
         printf("FAIL: Should fail with NULL device\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -74,6 +80,7 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareIllegalOperationError)
     {
         printf("FAIL: Should fail with NULL buffer list\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -82,6 +89,7 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareIllegalOperationError)
     {
         printf("FAIL: Should fail with zero frame count\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -91,6 +99,7 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareNoError)
     {
         printf("FAIL: Set volume failed\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -99,18 +108,20 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareNoError)
     {
         printf("FAIL: Process output failed\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
 
     // 验证音量缩放是否正确
-    Float32* processedData = (Float32*)bufferList.mBuffers[0].mData;
+    const Float32* processedData = (const Float32*)bufferList.mBuffers[0].mData;
     for (UInt32 i = 0; i < frameCount * channelCount; i++)
     {
         if (!float_equals(processedData[i], 0.25f))
         {
             // 0.5 * 0.5 = 0.25
             printf("FAIL: Volume scaling incorrect at sample %d\n", i);
+            free(testData);
             virtual_device_destroy(device);
             return 1;
         }
@@ -121,6 +132,7 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareNoError)
     {
         printf("FAIL: Set mute failed\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -129,6 +141,7 @@ static int test_basic_output_processing()
     if (status != kAudioHardwareNoError)
     {
         printf("FAIL: Process output failed during mute test\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -139,11 +152,13 @@ static int test_basic_output_processing()
         if (!float_equals(processedData[i], 0.0f))
         {
             printf("FAIL: Mute not working correctly at sample %d\n", i);
+            free(testData);
             virtual_device_destroy(device);
             return 1;
         }
     }
 
+    free(testData);
     virtual_device_destroy(device);
     printf("PASS: Basic output processing test\n");
     return 0;
@@ -175,7 +190,13 @@ static int test_output_clipping()
     // 创建测试音频缓冲区
     const UInt32 frameCount = 64;
     const UInt32 channelCount = 2;
-    Float32 testData[frameCount * channelCount];
+    Float32* testData = (Float32*)malloc(frameCount * channelCount * sizeof(Float32));
+    if (testData == NULL)
+    {
+        printf("FAIL: Memory allocation failed\n");
+        virtual_device_destroy(device);
+        return 1;
+    }
 
     // 填充超出范围的测试数据
     for (UInt32 i = 0; i < frameCount * channelCount; i++)
@@ -199,6 +220,7 @@ static int test_output_clipping()
     if (status != kAudioHardwareNoError)
     {
         printf("FAIL: Set volume failed\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
@@ -207,22 +229,25 @@ static int test_output_clipping()
     if (status != kAudioHardwareNoError)
     {
         printf("FAIL: Process output failed\n");
+        free(testData);
         virtual_device_destroy(device);
         return 1;
     }
 
     // 验证限幅是否正确
-    Float32* processedData = (Float32*)bufferList.mBuffers[0].mData;
+    const Float32* processedData = (const Float32*)bufferList.mBuffers[0].mData;
     for (UInt32 i = 0; i < frameCount * channelCount; i++)
     {
         if (!float_equals(processedData[i], 1.0f))
         {
             printf("FAIL: Clipping not working correctly at sample %d\n", i);
+            free(testData);
             virtual_device_destroy(device);
             return 1;
         }
     }
 
+    free(testData);
     virtual_device_destroy(device);
     printf("PASS: Output clipping test\n");
     return 0;

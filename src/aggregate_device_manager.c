@@ -11,6 +11,57 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#pragma mark - 监听器
+
+static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 inNumberAddresses,
+                                     const AudioObjectPropertyAddress inAddresses[], void* __unused inClientData)
+{
+    for (UInt32 i = 0; i < inNumberAddresses; i++)
+    {
+        if (inAddresses[i].mSelector != kAudioHardwarePropertyDevices &&
+            inAddresses[i].mSelector != kAudioHardwarePropertyDefaultOutputDevice)
+        {
+            continue;
+        }
+
+        if (!aggregate_device_is_active())
+        {
+            continue;
+        }
+
+        AudioDeviceID currentPhysical = aggregate_device_get_physical_device();
+        if (currentPhysical == kAudioObjectUnknown)
+        {
+            printf("⚠️ 物理设备已断开，正在尝试重新配置 Aggregate Device...\n");
+            aggregate_device_activate();
+        }
+    }
+    return noErr;
+}
+
+OSStatus aggregate_device_init(void)
+{
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+    };
+    OSStatus status = AudioObjectAddPropertyListener(kAudioObjectSystemObject, &addr, device_listener_proc, NULL);
+    if (status != noErr) return status;
+
+    addr.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+    return AudioObjectAddPropertyListener(kAudioObjectSystemObject, &addr, device_listener_proc, NULL);
+}
+
+void aggregate_device_cleanup(void)
+{
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+    };
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &addr, device_listener_proc, NULL);
+
+    addr.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &addr, device_listener_proc, NULL);
+}
+
 #pragma mark - 内部辅助函数
 
 static OSStatus get_all_devices(AudioDeviceID** devices, UInt32* count)
@@ -21,12 +72,30 @@ static OSStatus get_all_devices(AudioDeviceID** devices, UInt32* count)
     UInt32 dataSize = 0;
     OSStatus status = AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize);
     if (status != noErr) return status;
+
     *count = dataSize / sizeof(AudioDeviceID);
+    if (*count == 0)
+    {
+        *devices = NULL;
+        return noErr;
+    }
+
     *devices = (AudioDeviceID*)malloc(dataSize);
+    if (*devices == NULL) return kAudioHardwareUnspecifiedError;
+
     status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize, *devices);
+    if (status != noErr)
+    {
+        free(*devices);
+        *devices = NULL;
+    }
     return status;
 }
 
+/**
+ * 获取设备的 UID
+ * uidSize 显式传递以确保 CFStringGetCString 的内存安全，防止缓冲区溢出
+ */
 static OSStatus get_device_uid(AudioDeviceID deviceId, char* uid, size_t uidSize)
 {
     CFStringRef uidRef = NULL;
@@ -35,12 +104,18 @@ static OSStatus get_device_uid(AudioDeviceID deviceId, char* uid, size_t uidSize
         kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
     OSStatus status = AudioObjectGetPropertyData(deviceId, &propertyAddress, 0, NULL, &dataSize, &uidRef);
-    if (status != noErr || uidRef == NULL) return status;
+    if (status != noErr) return status;
+    if (uidRef == NULL) return kAudioHardwareUnknownPropertyError;
+
     CFStringGetCString(uidRef, uid, (CFIndex)uidSize, kCFStringEncodingUTF8);
     CFRelease(uidRef);
     return noErr;
 }
 
+/**
+ * 获取设备的名称
+ * nameSize 显式传递以确保 CFStringGetCString 的内存安全
+ */
 static OSStatus get_device_name(AudioDeviceID deviceId, char* name, size_t nameSize)
 {
     CFStringRef nameRef = NULL;
@@ -49,19 +124,18 @@ static OSStatus get_device_name(AudioDeviceID deviceId, char* name, size_t nameS
         kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
     OSStatus status = AudioObjectGetPropertyData(deviceId, &propertyAddress, 0, NULL, &dataSize, &nameRef);
-    if (status == noErr && nameRef)
-    {
-        CFStringGetCString(nameRef, name, (CFIndex)nameSize, kCFStringEncodingUTF8);
-        CFRelease(nameRef);
-        return noErr;
-    }
-    return status;
+    if (status != noErr) return status;
+    if (nameRef == NULL) return kAudioHardwareUnknownPropertyError;
+
+    CFStringGetCString(nameRef, name, (CFIndex)nameSize, kCFStringEncodingUTF8);
+    CFRelease(nameRef);
+    return noErr;
 }
 
 static bool is_virtual_device(AudioDeviceID deviceId)
 {
     char uid[256] = {0};
-    get_device_uid(deviceId, uid, sizeof(uid));
+    if (get_device_uid(deviceId, uid, sizeof(uid)) != noErr) return false;
     return strstr(uid, VIRTUAL_DEVICE_UID) != NULL || strstr(uid, "Virtual") != NULL;
 }
 
@@ -80,14 +154,16 @@ static AudioDeviceID find_aggregate_device(void)
 {
     AudioDeviceID* devices = NULL;
     UInt32 count = 0;
-    if (get_all_devices(&devices, &count) != noErr) return kAudioObjectUnknown;
+    if (get_all_devices(&devices, &count) != noErr || devices == NULL) return kAudioObjectUnknown;
+
     AudioDeviceID agg = kAudioObjectUnknown;
     for (UInt32 i = 0; i < count; i++)
     {
         if (!is_aggregate_device(devices[i])) continue;
+
         char name[256] = {0};
-        get_device_name(devices[i], name, sizeof(name));
-        if (strstr(name, "audioctl Aggregate"))
+        if (get_device_name(devices[i], name, sizeof(name)) == noErr &&
+            strstr(name, "audioctl Aggregate"))
         {
             agg = devices[i];
             break;
@@ -102,9 +178,13 @@ static AudioDeviceID find_aggregate_device(void)
 OSStatus aggregate_device_create(AudioDeviceID physicalDeviceID)
 {
     VirtualDeviceInfo vInfo;
-    if (!virtual_device_get_info(&vInfo)) return -1;
-    if (physicalDeviceID == kAudioObjectUnknown) physicalDeviceID = aggregate_device_get_recommended_physical_device();
-    if (physicalDeviceID == kAudioObjectUnknown) return -1;
+    if (!virtual_device_get_info(&vInfo)) return kAudioHardwareNotRunningError;
+
+    if (physicalDeviceID == kAudioObjectUnknown)
+    {
+        physicalDeviceID = aggregate_device_get_recommended_physical_device();
+    }
+    if (physicalDeviceID == kAudioObjectUnknown) return kAudioHardwareBadDeviceError;
 
     aggregate_device_destroy();
 
@@ -113,14 +193,17 @@ OSStatus aggregate_device_create(AudioDeviceID physicalDeviceID)
     CFStringRef uidRef = CFStringCreateWithCString(NULL, uid, kCFStringEncodingUTF8);
     CFStringRef nameRef = CFStringCreateWithCString(NULL, AGGREGATE_DEVICE_NAME, kCFStringEncodingUTF8);
 
-    char vUID[256], pUID[256];
+    char vUID[256];
+    char pUID[256];
     get_device_uid(vInfo.deviceId, vUID, sizeof(vUID));
     get_device_uid(physicalDeviceID, pUID, sizeof(pUID));
     CFStringRef vUIDRef = CFStringCreateWithCString(NULL, vUID, kCFStringEncodingUTF8);
     CFStringRef pUIDRef = CFStringCreateWithCString(NULL, pUID, kCFStringEncodingUTF8);
 
     CFMutableArrayRef sublist = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
-    int ch2 = 2, drift1 = 1, drift0 = 0;
+    int ch2 = 2;
+    int drift1 = 1;
+    int drift0 = 0;
     CFNumberRef n2 = CFNumberCreate(NULL, kCFNumberIntType, &ch2);
     CFNumberRef nOn = CFNumberCreate(NULL, kCFNumberIntType, &drift1);
     CFNumberRef nOff = CFNumberCreate(NULL, kCFNumberIntType, &drift0);
@@ -172,7 +255,10 @@ OSStatus aggregate_device_create(AudioDeviceID physicalDeviceID)
     CFRelease(vUIDRef);
     CFRelease(pUIDRef);
 
-    if (status == noErr) printf("✅ Aggregate Device 已恢复 4 通道布局\n");
+    if (status == noErr)
+    {
+        printf("✅ Aggregate Device 已恢复 4 通道布局\n");
+    }
     return status;
 }
 
@@ -183,11 +269,45 @@ OSStatus aggregate_device_destroy(void)
     return noErr;
 }
 
+OSStatus aggregate_device_update_physical_device(AudioDeviceID newPhysicalDeviceID)
+{
+    return aggregate_device_create(newPhysicalDeviceID);
+}
+
+/**
+ * 从 Aggregate Device 中提取物理设备的名称
+ * nameSize 用于确保写入名称时的内存安全
+ */
+static void get_physical_device_name_from_aggregate(char* outName, size_t nameSize)
+{
+    AggregateDeviceInfo info;
+    if (!aggregate_device_get_info(&info))
+    {
+        return;
+    }
+
+    for (UInt32 i = 0; i < info.subDeviceCount; i++)
+    {
+        if (is_virtual_device(info.subDevices[i]))
+        {
+            continue;
+        }
+
+        get_device_name(info.subDevices[i], outName, nameSize);
+        break;
+    }
+}
+
 OSStatus aggregate_device_activate(void)
 {
-    if (!aggregate_device_is_created()) aggregate_device_create(kAudioObjectUnknown);
+    if (!aggregate_device_is_created())
+    {
+        OSStatus createStatus = aggregate_device_create(kAudioObjectUnknown);
+        if (createStatus != noErr) return createStatus;
+    }
+
     AudioDeviceID agg = find_aggregate_device();
-    if (agg == kAudioObjectUnknown) return -1;
+    if (agg == kAudioObjectUnknown) return kAudioHardwareBadDeviceError;
 
     AudioObjectPropertyAddress outAddr = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
@@ -195,54 +315,56 @@ OSStatus aggregate_device_activate(void)
     OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, sizeof(AudioDeviceID),
                                                  &agg);
 
-    if (status == noErr)
-    {
-        char physName[256] = "未知物理设备";
-        AggregateDeviceInfo info;
-        if (aggregate_device_get_info(&info))
-        {
-            for (UInt32 i = 0; i < info.subDeviceCount; i++)
-            {
-                if (!is_virtual_device(info.subDevices[i]))
-                {
-                    get_device_name(info.subDevices[i], physName, sizeof(physName));
-                    break;
-                }
-            }
-        }
-        printf("✅ Aggregate Device 已设为默认输出\n");
-        printf("   音频流: 应用 → 虚拟设备(音量控制) → %s\n", physName);
-    }
+    if (status != noErr) return status;
+
+    char physName[256] = "未知物理设备";
+    get_physical_device_name_from_aggregate(physName, sizeof(physName));
+
+    printf("✅ Aggregate Device 已设为默认输出\n");
+    printf("   音频流: 应用 → 虚拟设备(音量控制) → %s\n", physName);
+
     return status;
 }
 
 OSStatus aggregate_device_deactivate(void)
 {
     AudioDeviceID physical = aggregate_device_get_recommended_physical_device();
+    if (physical == kAudioObjectUnknown) return kAudioHardwareBadDeviceError;
+
     AudioObjectPropertyAddress outAddr = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
     return AudioObjectSetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, sizeof(AudioDeviceID), &physical);
 }
 
-bool aggregate_device_is_created(void) { return find_aggregate_device() != kAudioObjectUnknown; }
+bool aggregate_device_is_created(void)
+{
+    return find_aggregate_device() != kAudioObjectUnknown;
+}
 
 bool aggregate_device_is_active(void)
 {
     AudioDeviceID agg = find_aggregate_device();
-    AudioDeviceID def;
+    if (agg == kAudioObjectUnknown) return false;
+
+    AudioDeviceID def = kAudioObjectUnknown;
     UInt32 sz = sizeof(def);
     AudioObjectPropertyAddress outAddr = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
-    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, &sz, &def) != noErr) return false;
-    return (agg != kAudioObjectUnknown && agg == def);
+
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, &sz, &def) != noErr)
+    {
+        return false;
+    }
+    return agg == def;
 }
 
 bool aggregate_device_get_info(AggregateDeviceInfo* outInfo)
 {
     AudioDeviceID agg = find_aggregate_device();
     if (agg == kAudioObjectUnknown) return false;
+
     outInfo->deviceId = agg;
     outInfo->isCreated = true;
     outInfo->isActive = aggregate_device_is_active();
@@ -252,9 +374,18 @@ bool aggregate_device_get_info(AggregateDeviceInfo* outInfo)
         kAudioObjectPropertyElementMain
     };
     UInt32 sz = 0;
-    AudioObjectGetPropertyDataSize(agg, &subAddr, 0, NULL, &sz);
+    OSStatus status = AudioObjectGetPropertyDataSize(agg, &subAddr, 0, NULL, &sz);
+    if (status != noErr)
+    {
+        outInfo->subDeviceCount = 0;
+        return true;
+    }
+
     outInfo->subDeviceCount = sz / sizeof(AudioDeviceID);
-    AudioObjectGetPropertyData(agg, &subAddr, 0, NULL, &sz, outInfo->subDevices);
+    if (outInfo->subDeviceCount > 0)
+    {
+        AudioObjectGetPropertyData(agg, &subAddr, 0, NULL, &sz, outInfo->subDevices);
+    }
     return true;
 }
 
@@ -266,18 +397,53 @@ void aggregate_device_print_status(void)
         printf("⚠️ Aggregate Device 未创建\n");
         return;
     }
-    printf("✅ Aggregate Device 已就绪 (稳健模式)\n");
+    printf("✅ Aggregate Device 已就绪 (稳健模式)\n\n");
+}
+
+AudioDeviceID aggregate_device_get_physical_device(void)
+{
+    AggregateDeviceInfo info;
+    if (!aggregate_device_get_info(&info)) return kAudioObjectUnknown;
+
+    for (UInt32 i = 0; i < info.subDeviceCount; i++)
+    {
+        if (!is_virtual_device(info.subDevices[i]))
+        {
+            return info.subDevices[i];
+        }
+    }
+    return kAudioObjectUnknown;
+}
+
+bool aggregate_device_contains_virtual(const AggregateDeviceInfo* info)
+{
+    for (UInt32 i = 0; i < info->subDeviceCount; i++)
+    {
+        if (is_virtual_device(info->subDevices[i])) return true;
+    }
+    return false;
+}
+
+bool aggregate_device_contains_physical(const AggregateDeviceInfo* info, AudioDeviceID physicalDevice)
+{
+    for (UInt32 i = 0; i < info->subDeviceCount; i++)
+    {
+        if (info->subDevices[i] == physicalDevice) return true;
+    }
+    return false;
 }
 
 AudioDeviceID aggregate_device_get_recommended_physical_device(void)
 {
     AudioDeviceID* devices = NULL;
     UInt32 count = 0;
-    get_all_devices(&devices, &count);
+    if (get_all_devices(&devices, &count) != noErr || devices == NULL) return kAudioObjectUnknown;
+
     AudioDeviceID rec = kAudioObjectUnknown;
     for (UInt32 i = 0; i < count; i++)
     {
         if (is_virtual_device(devices[i]) || is_aggregate_device(devices[i])) continue;
+
         AudioObjectPropertyAddress streamAddr = {
             kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain
         };
@@ -288,6 +454,7 @@ AudioDeviceID aggregate_device_get_recommended_physical_device(void)
             break;
         }
     }
+
     free(devices);
     return rec;
 }

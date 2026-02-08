@@ -5,8 +5,6 @@
 
 #include "driver/app_volume_driver.h"
 #include "app_volume_control.h"
-#include <stdio.h>
-#include <string.h>
 #include <pthread.h>
 #include <sys/shm.h>
 
@@ -23,11 +21,11 @@ static AppVolumeList* g_shmVolumeList = NULL;
 
 #pragma mark - 初始化和清理
 
-OSStatus app_volume_driver_init(void)
+void app_volume_driver_init(void)
 {
     if (g_initialized)
     {
-        return noErr;
+        return;
     }
 
     memset(&g_clientManager, 0, sizeof(g_clientManager));
@@ -46,7 +44,6 @@ OSStatus app_volume_driver_init(void)
     }
 
     g_initialized = true;
-    return noErr;
 }
 
 void app_volume_driver_cleanup(void)
@@ -162,11 +159,32 @@ OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bu
         strncpy(entry->name, name, sizeof(entry->name) - 1);
         entry->name[sizeof(entry->name) - 1] = '\0';
     }
+    entry->volume = 1.0f; // 默认音量 100%
+    entry->isMuted = false;
     entry->isActive = true;
 
     pthread_mutex_unlock(&g_clientManager.mutex);
 
     return noErr;
+}
+
+OSStatus app_volume_driver_update_by_pid(pid_t pid, Float32 volume, bool isMuted)
+{
+    pthread_mutex_lock(&g_clientManager.mutex);
+
+    ClientVolumeEntry* entry = find_client_by_pid(pid);
+    if (entry != NULL)
+    {
+        entry->volume = volume;
+        entry->isMuted = isMuted;
+        pthread_mutex_unlock(&g_clientManager.mutex);
+        return noErr;
+    }
+
+    // 如果客户端还没注册，我们可以预先保存这个PID的音量设置吗？
+    // 为了简单起见，这里只处理已存在的客户端。
+    pthread_mutex_unlock(&g_clientManager.mutex);
+    return -1;
 }
 
 OSStatus app_volume_driver_remove_client(UInt32 clientID)
@@ -198,7 +216,7 @@ pid_t app_volume_driver_get_pid(UInt32 clientID)
 {
     pthread_mutex_lock(&g_clientManager.mutex);
 
-    ClientVolumeEntry* entry = find_client_by_id(clientID);
+    const ClientVolumeEntry* entry = find_client_by_id(clientID);
     pid_t pid = entry != NULL ? entry->pid : -1;
 
     pthread_mutex_unlock(&g_clientManager.mutex);
@@ -213,47 +231,43 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
     Float32 volume = 1.0f;
     bool isMuted = false;
 
-    // 1. 获取 PID (使用 TryLock)
+    // 1. 获取 PID 并检查内部存储 (使用 TryLock)
     pid_t pid = -1;
     if (pthread_mutex_trylock(&g_clientManager.mutex) == 0)
     {
-        ClientVolumeEntry* entry = find_client_by_id(clientID);
-        pid = entry != NULL ? entry->pid : -1;
+        const ClientVolumeEntry* entry = find_client_by_id(clientID);
+        if (entry != NULL)
+        {
+            pid = entry->pid;
+            volume = entry->volume;
+            isMuted = entry->isMuted;
+        }
         pthread_mutex_unlock(&g_clientManager.mutex);
     }
     else
     {
-        // 如果获取锁失败（例如被其他线程持有），直接返回默认值，避免阻塞 IO 线程
+        // 如果获取锁失败，直接返回默认值，避免阻塞 IO 线程
         if (outIsMuted != NULL) *outIsMuted = false;
         return 1.0f;
     }
 
-    if (pid < 0)
+    // 2. 从共享内存同步音量 (如果有 PID)
+    if (pid < 0 || g_shmVolumeList == NULL || pthread_mutex_trylock(&g_shmVolumeList->mutex) != 0)
     {
-        if (outIsMuted != NULL) *outIsMuted = false;
-        return 1.0f;
+        if (outIsMuted != NULL) *outIsMuted = isMuted;
+        return isMuted ? 0.0f : volume;
     }
 
-    // 2. 从共享内存读取音量 (使用 TryLock)
-    if (g_shmVolumeList != NULL)
+    for (UInt32 i = 0; i < g_shmVolumeList->count; i++)
     {
-        // 关键修复：使用 trylock 防止死锁。
-        // 如果共享内存锁被持有（例如 CLI 崩溃），我们不能在这里等待。
-        if (pthread_mutex_trylock(&g_shmVolumeList->mutex) == 0)
+        if (g_shmVolumeList->entries[i].pid == pid)
         {
-            for (UInt32 i = 0; i < g_shmVolumeList->count; i++)
-            {
-                if (g_shmVolumeList->entries[i].pid == pid)
-                {
-                    volume = g_shmVolumeList->entries[i].volume;
-                    isMuted = g_shmVolumeList->entries[i].isMuted;
-                    break;
-                }
-            }
-            pthread_mutex_unlock(&g_shmVolumeList->mutex);
+            volume = g_shmVolumeList->entries[i].volume;
+            isMuted = g_shmVolumeList->entries[i].isMuted;
+            break;
         }
-        // 如果无法获取锁，保持默认音量 (1.0)，确保不阻塞音频流
     }
+    pthread_mutex_unlock(&g_shmVolumeList->mutex);
 
     if (outIsMuted != NULL)
     {

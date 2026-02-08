@@ -36,7 +36,7 @@ typedef struct
 #pragma mark - 初始化和清理
 
 // 初始化应用音量控制系统
-OSStatus app_volume_control_init(void);
+void app_volume_control_init(void);
 
 // 清理应用音量控制系统
 void app_volume_control_cleanup(void);

@@ -26,6 +26,14 @@ typedef struct
 #define AGGREGATE_DEVICE_UID_PREFIX "audioctl-aggregate"
 #define AGGREGATE_DEVICE_NAME "audioctl Aggregate"
 
+#pragma mark - 生命周期管理
+
+// 初始化管理模块（注册监听器）
+OSStatus aggregate_device_init(void);
+
+// 清理管理模块（移除监听器）
+void aggregate_device_cleanup(void);
+
 #pragma mark - 设备检测
 
 // 检测 Aggregate Device 是否已创建

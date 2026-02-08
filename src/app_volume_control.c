@@ -4,13 +4,13 @@
 //
 
 #include "app_volume_control.h"
+#include "virtual_device_manager.h"
+#include "driver/app_volume_driver.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/shm.h>
 #include <sys/ipc.h>
 #include <pthread.h>
-#include <unistd.h>
 #include <CoreServices/CoreServices.h>
 
 // 共享内存键
@@ -26,11 +26,11 @@ static AppVolumeList* g_shmVolumeList = NULL;
 
 #pragma mark - 初始化和清理
 
-OSStatus app_volume_control_init(void)
+void app_volume_control_init(void)
 {
     if (g_initialized)
     {
-        return noErr;
+        return;
     }
 
     memset(&g_volumeList, 0, sizeof(g_volumeList));
@@ -45,8 +45,6 @@ OSStatus app_volume_control_init(void)
     {
         printf("警告: 无法初始化共享内存: %d\n", status);
     }
-
-    return noErr;
 }
 
 void app_volume_control_cleanup(void)
@@ -104,7 +102,9 @@ static AppVolumeInfo* find_or_create_entry(pid_t pid)
         return NULL; // 列表已满
     }
 
-    entry = &g_volumeList.entries[g_volumeList.count++];
+    entry = &g_volumeList.entries[g_volumeList.count];
+    g_volumeList.count++;
+
     memset(entry, 0, sizeof(AppVolumeInfo));
     entry->pid = pid;
     entry->volume = 1.0f; // 默认音量100%
@@ -116,10 +116,42 @@ static AppVolumeInfo* find_or_create_entry(pid_t pid)
 
 #pragma mark - 音量控制
 
+// 同步音量到驱动 (通过 HAL 属性或共享内存)
+static OSStatus sync_app_volume(pid_t pid, Float32 volume, bool isMuted)
+{
+    // 1. 尝试通过 HAL 属性同步 (更安全，支持沙盒)
+    VirtualDeviceInfo vInfo;
+    if (virtual_device_get_info(&vInfo) && vInfo.deviceId != kAudioObjectUnknown)
+    {
+        AppVolumePropertyData propData = {
+            .pid = pid,
+            .volume = volume,
+            .isMuted = isMuted
+        };
+
+        AudioObjectPropertyAddress address = {
+            kAudioDevicePropertyAppVolume,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+
+        OSStatus status = AudioObjectSetPropertyData(vInfo.deviceId, &address, 0, NULL, sizeof(propData), &propData);
+        if (status == noErr)
+        {
+            // HAL 同步成功
+            return noErr;
+        }
+    }
+
+    // 2. 备选方案：通过共享内存同步 (可能受沙盒限制)
+    return app_volume_sync_to_shm();
+}
+
 OSStatus app_volume_set(pid_t pid, Float32 volume)
 {
-    if (volume < 0.0f) volume = 0.0f;
-    if (volume > 1.0f) volume = 1.0f;
+    Float32 validatedVolume = volume;
+    if (validatedVolume < 0.0f) validatedVolume = 0.0f;
+    if (validatedVolume > 1.0f) validatedVolume = 1.0f;
 
     pthread_mutex_lock(&g_volumeList.mutex);
 
@@ -127,15 +159,16 @@ OSStatus app_volume_set(pid_t pid, Float32 volume)
     if (entry == NULL)
     {
         pthread_mutex_unlock(&g_volumeList.mutex);
-        return -1; // 应用未找到
+        return kAudioHardwareBadDeviceError;
     }
 
-    entry->volume = volume;
+    entry->volume = validatedVolume;
+    bool isMuted = entry->isMuted;
 
     pthread_mutex_unlock(&g_volumeList.mutex);
 
-    // 同步到共享内存
-    app_volume_sync_to_shm();
+    // 同步到驱动
+    sync_app_volume(pid, validatedVolume, isMuted);
 
     return noErr;
 }
@@ -149,11 +182,11 @@ OSStatus app_volume_get(pid_t pid, Float32* outVolume)
 
     pthread_mutex_lock(&g_volumeList.mutex);
 
-    AppVolumeInfo* entry = find_entry_unlocked(pid);
+    const AppVolumeInfo* entry = find_entry_unlocked(pid);
     if (entry == NULL)
     {
         pthread_mutex_unlock(&g_volumeList.mutex);
-        return -1; // 应用未找到
+        return kAudioHardwareBadDeviceError;
     }
 
     *outVolume = entry->volume;
@@ -171,15 +204,16 @@ OSStatus app_volume_set_mute(pid_t pid, bool mute)
     if (entry == NULL)
     {
         pthread_mutex_unlock(&g_volumeList.mutex);
-        return -1; // 应用未找到
+        return kAudioHardwareBadDeviceError;
     }
 
     entry->isMuted = mute;
+    Float32 volume = entry->volume;
 
     pthread_mutex_unlock(&g_volumeList.mutex);
 
-    // 同步到共享内存
-    app_volume_sync_to_shm();
+    // 同步到驱动
+    sync_app_volume(pid, volume, mute);
 
     return noErr;
 }
@@ -193,11 +227,11 @@ OSStatus app_volume_get_mute(pid_t pid, bool* outMute)
 
     pthread_mutex_lock(&g_volumeList.mutex);
 
-    AppVolumeInfo* entry = find_entry_unlocked(pid);
+    const AppVolumeInfo* entry = find_entry_unlocked(pid);
     if (entry == NULL)
     {
         pthread_mutex_unlock(&g_volumeList.mutex);
-        return -1; // 应用未找到
+        return kAudioHardwareBadDeviceError;
     }
 
     *outMute = entry->isMuted;
@@ -256,7 +290,9 @@ OSStatus app_volume_unregister(pid_t pid)
                 g_volumeList.entries[j] = g_volumeList.entries[j + 1];
             }
             g_volumeList.count--;
-            memset(&g_volumeList.entries[g_volumeList.count], 0, sizeof(AppVolumeInfo));
+
+            AppVolumeInfo* lastEntry = &g_volumeList.entries[g_volumeList.count];
+            memset(lastEntry, 0, sizeof(AppVolumeInfo));
 
             pthread_mutex_unlock(&g_volumeList.mutex);
 
@@ -465,11 +501,11 @@ void app_volume_cli_list(void)
 
     for (UInt32 i = 0; i < count; i++)
     {
-        AppVolumeInfo* app = &apps[i];
+        const AppVolumeInfo* app = &apps[i];
         printf("%-8d %-20s %-30s %-9.0f%% %s\n",
                app->pid,
                app->name,
-               app->bundleId[0] ? app->bundleId : "N/A",
+               app->bundleId[0] != '\0' ? app->bundleId : "N/A",
                app->volume * 100.0f,
                app->isMuted ? "是" : "否");
     }
@@ -486,13 +522,13 @@ int app_volume_cli_set(const char* appNameOrPid, Float32 volume)
     }
 
     // 尝试解析为PID
-    char* endptr;
+    char* endptr = NULL;
     pid_t pid = (pid_t)strtol(appNameOrPid, &endptr, 10);
 
     pthread_mutex_lock(&g_volumeList.mutex);
 
-    AppVolumeInfo* entry = NULL;
-    if (*endptr == '\0')
+    const AppVolumeInfo* entry = NULL;
+    if (endptr != NULL && *endptr == '\0')
     {
         // 成功解析为数字PID
         entry = find_entry_unlocked(pid);
@@ -532,13 +568,13 @@ int app_volume_cli_set(const char* appNameOrPid, Float32 volume)
 int app_volume_cli_mute(const char* appNameOrPid, bool mute)
 {
     // 尝试解析为PID
-    char* endptr;
+    char* endptr = NULL;
     pid_t pid = (pid_t)strtol(appNameOrPid, &endptr, 10);
 
     pthread_mutex_lock(&g_volumeList.mutex);
 
-    AppVolumeInfo* entry = NULL;
-    if (*endptr == '\0')
+    const AppVolumeInfo* entry = NULL;
+    if (endptr != NULL && *endptr == '\0')
     {
         entry = find_entry_unlocked(pid);
     }

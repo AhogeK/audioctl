@@ -15,16 +15,24 @@
 static void kill_router(void)
 {
     FILE* fp = fopen(ROUTER_PID_FILE, "r");
-    if (fp)
+    if (fp == NULL)
     {
-        int pid = 0;
-        if (fscanf(fp, "%d", &pid) == 1 && pid > 0)
-        {
-            kill(pid, SIGTERM);
-        }
-        fclose(fp);
-        unlink(ROUTER_PID_FILE);
+        return;
     }
+
+    char buf[32];
+    if (fgets(buf, sizeof(buf), fp) != NULL)
+    {
+        char* endptr = NULL;
+        long pid = strtol(buf, &endptr, 10);
+        if (pid > 0 && pid <= INT32_MAX)
+        {
+            kill((pid_t)pid, SIGTERM);
+        }
+    }
+
+    fclose(fp);
+    unlink(ROUTER_PID_FILE);
 }
 
 void spawn_router(const char* self_path)
@@ -637,124 +645,64 @@ static int handleSetCommand(int argc, char* argv[])
                : handleDeviceSwitch(argc, argv);
 }
 
-// 主函数
-int main(const int argc, char* argv[])
+static int handleAppVolumeCommands(int argc, char* argv[])
 {
-    if (argc < 2)
+    if (!aggregate_device_is_active())
     {
-        printUsage();
-        return 1;
-    }
-
-    // 处理版本命令
-    if (handleVersionCommand(argv[1]))
-    {
-        return 0;
-    }
-
-    // 处理主要命令
-    if (strcmp(argv[1], "help") == 0)
-    {
-        printUsage();
-        return 0;
-    }
-
-    if (strcmp(argv[1], "list") == 0)
-    {
-        return handleListCommand(argc, argv);
-    }
-
-    if (strcmp(argv[1], "set") == 0)
-    {
-        return handleSetCommand(argc, argv);
-    }
-
-    if (strcmp(argv[1], "apps") == 0)
-    {
-        return handleAppsCommand();
-    }
-
-    if (strcmp(argv[1], "app-volumes") == 0)
-    {
-        // 检查 Aggregate Device 状态
-        if (!aggregate_device_is_active())
+        printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
+        if (strcmp(argv[1], "app-volumes") == 0)
         {
-            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
             printf("\n");
             aggregate_device_print_status();
             printf("\n请运行: audioctl use-virtual 激活\n");
-            return 1;
         }
-        app_volume_control_init();
-        app_volume_cli_list();
-        app_volume_control_cleanup();
-        return 0;
+        else
+        {
+            printf("请运行: audioctl use-virtual 激活\n");
+        }
+        return 1;
     }
 
-    if (strcmp(argv[1], "app-volume") == 0)
+    app_volume_control_init();
+    int result = 0;
+
+    if (strcmp(argv[1], "app-volumes") == 0)
+    {
+        app_volume_cli_list();
+    }
+    else if (strcmp(argv[1], "app-volume") == 0)
     {
         if (argc < 4)
         {
-            printf("错误: 需要应用名称/PID和音量值\n");
-            printf("用法: audioctl app-volume [应用] [音量]\n");
-            return 1;
+            printf("错误: 需要应用名称/PID和音量值\n用法: audioctl app-volume [应用] [音量]\n");
+            result = 1;
         }
-        // 检查 Aggregate Device 状态
-        if (!aggregate_device_is_active())
+        else
         {
-            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
-            printf("请运行: audioctl use-virtual 激活\n");
-            return 1;
+            float volume = strtof(argv[3], NULL);
+            result = app_volume_cli_set(argv[2], volume);
         }
-        app_volume_control_init();
-        float volume = strtof(argv[3], NULL);
-        int result = app_volume_cli_set(argv[2], volume);
-        app_volume_control_cleanup();
-        return result;
     }
-
-    if (strcmp(argv[1], "app-mute") == 0)
+    else if (strcmp(argv[1], "app-mute") == 0 || strcmp(argv[1], "app-unmute") == 0)
     {
         if (argc < 3)
         {
-            printf("错误: 需要应用名称/PID\n");
-            printf("用法: audioctl app-mute [应用]\n");
-            return 1;
+            printf("错误: 需要应用名称/PID\n用法: audioctl %s [应用]\n", argv[1]);
+            result = 1;
         }
-        // 检查 Aggregate Device 状态
-        if (!aggregate_device_is_active())
+        else
         {
-            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
-            printf("请运行: audioctl use-virtual 激活\n");
-            return 1;
+            bool mute = (strcmp(argv[1], "app-mute") == 0);
+            result = app_volume_cli_mute(argv[2], mute);
         }
-        app_volume_control_init();
-        int result = app_volume_cli_mute(argv[2], true);
-        app_volume_control_cleanup();
-        return result;
     }
 
-    if (strcmp(argv[1], "app-unmute") == 0)
-    {
-        if (argc < 3)
-        {
-            printf("错误: 需要应用名称/PID\n");
-            printf("用法: audioctl app-unmute [应用]\n");
-            return 1;
-        }
-        // 检查 Aggregate Device 状态
-        if (!aggregate_device_is_active())
-        {
-            printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
-            printf("请运行: audioctl use-virtual 激活\n");
-            return 1;
-        }
-        app_volume_control_init();
-        int result = app_volume_cli_mute(argv[2], false);
-        app_volume_control_cleanup();
-        return result;
-    }
+    app_volume_control_cleanup();
+    return result;
+}
 
+static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
+{
     if (strcmp(argv[1], "virtual-status") == 0)
     {
         virtual_device_print_status();
@@ -765,33 +713,16 @@ int main(const int argc, char* argv[])
     {
         if (!virtual_device_is_installed())
         {
-            printf("❌ 虚拟音频设备未安装\n\n");
-            printf("请运行以下命令安装:\n");
-            printf("  cd cmake-build-debug\n");
-            printf("  sudo ninja install\n\n");
-            printf("安装后重启音频服务:\n");
-            printf("  sudo launchctl kickstart -k system/com.apple.audio.coreaudiod\n");
+            printf(
+                "❌ 虚拟音频设备未安装\n\n请运行以下命令安装:\n  cd cmake-build-debug\n  sudo ninja install\n\n安装后重启音频服务:\n  sudo launchctl kickstart -k system/com.apple.audio.coreaudiod\n");
             return 1;
         }
+        if (aggregate_device_activate() != noErr) return 1;
 
-        // 1. 创建聚合设备
-        if (aggregate_device_activate() != noErr)
-        {
-            return 1;
-        }
-
-        // 2. 启动混音路由器 (搬运 1-2 到 3-4)
         char self_path[4096];
         uint32_t size = sizeof(self_path);
-        if (_NSGetExecutablePath(self_path, &size) == 0)
-        {
-            spawn_router(self_path);
-        }
-        else
-        {
-            fprintf(stderr, "无法获取可执行文件路径，路由无法启动\n");
-        }
-
+        if (_NSGetExecutablePath(self_path, &size) == 0) spawn_router(self_path);
+        else fprintf(stderr, "无法获取可执行文件路径，路由无法启动\n");
         return 0;
     }
 
@@ -801,43 +732,77 @@ int main(const int argc, char* argv[])
         return aggregate_device_deactivate() == noErr ? 0 : 1;
     }
 
-    if (strcmp(argv[1], "internal-route") == 0)
-    {
-        start_router_loop();
-        return 0;
-    }
-
     if (strcmp(argv[1], "agg-status") == 0)
     {
         aggregate_device_print_status();
         return 0;
     }
 
-    if (strcmp(argv[1], "--start-service") == 0)
+    return 1;
+}
+
+static int handleServiceCommands(const char* cmd)
+{
+    if (strcmp(cmd, "--start-service") == 0)
     {
         ServiceStatus status = service_start();
         return (status == SERVICE_STATUS_SUCCESS || status == SERVICE_STATUS_ALREADY_RUNNING) ? 0 : 1;
     }
-
-    if (strcmp(argv[1], "--stop-service") == 0)
+    if (strcmp(cmd, "--stop-service") == 0)
     {
         ServiceStatus status = service_stop();
         return (status == SERVICE_STATUS_SUCCESS || status == SERVICE_STATUS_NOT_RUNNING) ? 0 : 1;
     }
-
-    if (strcmp(argv[1], "--restart-service") == 0)
-    {
-        return service_restart() == SERVICE_STATUS_SUCCESS ? 0 : 1;
-    }
-
-    if (strcmp(argv[1], "--service-status") == 0)
+    if (strcmp(cmd, "--restart-service") == 0) return service_restart() == SERVICE_STATUS_SUCCESS ? 0 : 1;
+    if (strcmp(cmd, "--service-status") == 0)
     {
         print_service_status();
         return 0;
     }
+    return 1;
+}
 
-    // 处理未知命令
-    printf("未知命令: %s\n", argv[1]);
+// 主函数
+int main(const int argc, char* argv[])
+{
+    if (argc < 2)
+    {
+        printUsage();
+        return 1;
+    }
+
+    const char* cmd = argv[1];
+
+    if (handleVersionCommand(cmd)) return 0;
+    if (strcmp(cmd, "help") == 0)
+    {
+        printUsage();
+        return 0;
+    }
+
+    if (strcmp(cmd, "list") == 0) return handleListCommand(argc, argv);
+    if (strcmp(cmd, "set") == 0) return handleSetCommand(argc, argv);
+    if (strcmp(cmd, "apps") == 0) return handleAppsCommand();
+
+    if (strncmp(cmd, "app-", 4) == 0) return handleAppVolumeCommands(argc, argv);
+
+    if (strcmp(cmd, "virtual-status") == 0 || strcmp(cmd, "use-virtual") == 0 ||
+        strcmp(cmd, "use-physical") == 0 || strcmp(cmd, "agg-status") == 0)
+    {
+        return handleVirtualDeviceCommands(argc, argv);
+    }
+
+    if (strcmp(cmd, "internal-route") == 0)
+    {
+        aggregate_device_init();
+        start_router_loop();
+        aggregate_device_cleanup();
+        return 0;
+    }
+
+    if (strncmp(cmd, "--", 2) == 0) return handleServiceCommands(cmd);
+
+    printf("未知命令: %s\n", cmd);
     printUsage();
     return 1;
 }

@@ -56,7 +56,6 @@ endif ()
 add_library(virtual_audio_driver MODULE
         "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
         "${CMAKE_SOURCE_DIR}/src/driver/app_volume_driver.c"
-        "${CMAKE_SOURCE_DIR}/src/app_volume_control.c"
 )
 
 # 添加资源文件到目标

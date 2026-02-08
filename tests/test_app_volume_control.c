@@ -13,20 +13,10 @@ static int test_init_cleanup()
 {
     printf("Testing app_volume_control init and cleanup...\n");
 
-    OSStatus status = app_volume_control_init();
-    if (status != noErr)
-    {
-        printf("FAIL: Initialization failed with status %d\n", (int)status);
-        return 1;
-    }
+    app_volume_control_init();
 
     // 重复初始化应该成功
-    status = app_volume_control_init();
-    if (status != noErr)
-    {
-        printf("FAIL: Repeated initialization failed\n");
-        return 1;
-    }
+    app_volume_control_init();
 
     app_volume_control_cleanup();
 
@@ -277,7 +267,7 @@ static int test_app_find()
     app_volume_register(1234, "com.test.app", "TestApp");
 
     // 查找存在的应用
-    AppVolumeInfo* info = app_volume_find(1234);
+    const AppVolumeInfo* info = app_volume_find(1234);
     if (info == NULL)
     {
         printf("FAIL: Should find registered app\n");
@@ -293,8 +283,8 @@ static int test_app_find()
     }
 
     // 查找不存在的应用
-    info = app_volume_find(9999);
-    if (info != NULL)
+    const AppVolumeInfo* notFoundInfo = app_volume_find(9999);
+    if (notFoundInfo != NULL)
     {
         printf("FAIL: Should not find unregistered app\n");
         app_volume_control_cleanup();
