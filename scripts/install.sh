@@ -204,12 +204,30 @@ cmd_install() {
 
   /bin/mkdir -p "${BUILD_DIR}"
   cmake -S "${PROJECT_DIR}" -B "${BUILD_DIR}" -G Ninja -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+  
+  log_info "构建音频驱动..."
   cmake --build "${BUILD_DIR}" --target virtual_audio_driver -j "${PARALLEL_JOBS}"
+  
+  log_info "构建 audioctl 工具..."
+  cmake --build "${BUILD_DIR}" --target audioctl -j "${PARALLEL_JOBS}"
 
   install_driver_bundle
 
   log_success "安装完成"
   log_info "驱动已安装到: ${DRIVER_DST}"
+  
+  # 显示 audioctl 使用提示
+  if [[ -f "${BUILD_DIR}/bin/audioctl" ]]; then
+    log_info "audioctl 工具: ${BUILD_DIR}/bin/audioctl"
+    echo ""
+    echo "========== 使用提示 =========="
+    echo "  ${BUILD_DIR}/bin/audioctl help              # 查看所有命令"
+    echo "  ${BUILD_DIR}/bin/audioctl virtual-status    # 检查虚拟设备状态"
+    echo "  ${BUILD_DIR}/bin/audioctl use-virtual       # 切换到虚拟设备"
+    echo "  ${BUILD_DIR}/bin/audioctl use-physical      # 恢复物理设备"
+    echo "  ${BUILD_DIR}/bin/audioctl app-volumes       # 查看应用音量列表"
+    echo "=============================="
+  fi
 }
 
 cmd_uninstall() {
