@@ -1,15 +1,15 @@
 //
-// 驱动端应用音量控制 - 极简安全版（无共享内存）
+// Driver-side per-app volume control (minimal, no shared memory)
 // Created by AhogeK on 02/05/26.
 //
-// 注意：此为简化版本，仅保留基础框架，确保驱动稳定运行
-// 高级功能（CLI 控制音量）后续通过更安全的方式实现
+// This is a simplified version keeping only the basic framework for driver stability.
+// Advanced features (CLI volume control) will be implemented through safer mechanisms later.
 
 #include "driver/app_volume_driver.h"
 #include <pthread.h>
 #include <stdatomic.h>
 
-// 简化的客户端条目
+// Simplified client entry structure
 typedef struct
 {
     UInt32 clientID;
@@ -24,11 +24,11 @@ static atomic_int g_clientCount = 0;
 static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
 static bool g_initialized = false;
 
-// 默认音量表（简化：所有客户端默认音量 1.0，即无调节）
-// 后续可以通过 HAL 属性接口暴露控制点
+// Default volume table (simplified: all clients default to 1.0, i.e., no attenuation)
+// Future: expose control through HAL property interface
 static Float32 g_defaultVolume = 1.0f;
 
-#pragma mark - 初始化和清理
+#pragma mark - Initialization and Cleanup
 
 void app_volume_driver_init(void)
 {
@@ -57,7 +57,7 @@ void app_volume_driver_cleanup(void)
     g_initialized = false;
 }
 
-#pragma mark - 客户端管理
+#pragma mark - Client Management
 
 OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bundleId, const char* name)
 {
@@ -92,7 +92,7 @@ OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bu
     }
 
     pthread_mutex_unlock(&g_mutex);
-    return kAudioHardwareBadDeviceError;  // 客户端列表已满
+    return kAudioHardwareBadDeviceError; // Client list full
 }
 
 OSStatus app_volume_driver_remove_client(UInt32 clientID)
@@ -113,7 +113,7 @@ OSStatus app_volume_driver_remove_client(UInt32 clientID)
     }
 
     pthread_mutex_unlock(&g_mutex);
-    return kAudioHardwareBadDeviceError;  // 客户端未找到
+    return kAudioHardwareBadDeviceError; // Client not found
 }
 
 pid_t app_volume_driver_get_pid(UInt32 clientID)
@@ -130,7 +130,7 @@ pid_t app_volume_driver_get_pid(UInt32 clientID)
         }
     }
     pthread_mutex_unlock(&g_mutex);
-    
+
     return result;
 }
 
@@ -138,15 +138,15 @@ pid_t app_volume_driver_get_pid(UInt32 clientID)
 
 Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
 {
-    (void)clientID; // 简化版本：不根据客户端区分音量
+    (void)clientID; // Simplified: no per-client volume differentiation
 
     if (outIsMuted != NULL)
     {
         *outIsMuted = false;
     }
 
-    // 简化版本：返回默认音量 1.0（即不调节）
-    // 后续可以通过自定义 HAL 属性来控制
+    // Simplified: return default volume 1.0 (no attenuation)
+    // Future: control via custom HAL properties
     return g_defaultVolume;
 }
 
@@ -171,7 +171,8 @@ void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameC
     Float32* samples = (Float32*)buffer;
     UInt32 totalSamples = frameCount * channels;
 
-    for (UInt32 i = 0; i < totalSamples; i++) {
+    for (UInt32 i = 0; i < totalSamples; i++)
+    {
         samples[i] *= volume;
     }
 }

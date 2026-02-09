@@ -212,8 +212,6 @@ static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef 
     return 0;
 }
 
-// 此函数由 macOS AudioServerPlugIn 接口调用。由于驱动目前的 IO 处理始终成功（仅涉及内存操作），
-// 因此始终返回 noErr (0)。这是符合接口规范要求的实现。
 static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __unused inDriver,
                                                  AudioObjectID __unused inDeviceObjectID,
                                                  AudioObjectID inStreamObjectID, UInt32 inClientID,
@@ -264,8 +262,14 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
             == kAudioObjectPropertyName || inAddress->mSelector == kAudioDevicePropertyStreams || inAddress->mSelector
             == kAudioDevicePropertyNominalSampleRate);
     case kObjectID_Stream_Input:
-    case kObjectID_Stream_Output: return true;
-    default: break;
+    case kObjectID_Stream_Output:
+        // [优化：只声明实际支持的属性，避免 CoreAudio 反复查询不支持的属性]
+        return (inAddress->mSelector == kAudioObjectPropertyBaseClass ||
+            inAddress->mSelector == kAudioObjectPropertyClass ||
+            inAddress->mSelector == kAudioStreamPropertyDirection ||
+            inAddress->mSelector == kAudioStreamPropertyIsActive);
+    default:
+        break;
     }
     return false;
 }
