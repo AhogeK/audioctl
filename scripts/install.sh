@@ -70,11 +70,59 @@ hash_dir() {
     shasum -a 256 | awk '{print $1}'
 }
 
+kill_audioctl_processes() {
+  log_info "清理 audioctl 相关进程..."
+
+  # 杀死路由进程
+  if [[ -f "/tmp/audioctl_router.pid" ]]; then
+    local router_pid
+    router_pid="$(cat /tmp/audioctl_router.pid 2>/dev/null)" || true
+    if [[ -n "${router_pid}" ]] && kill -0 "${router_pid}" 2>/dev/null; then
+      log_info "停止路由进程 (PID: ${router_pid})..."
+      kill -TERM "${router_pid}" 2>/dev/null || true
+      sleep 1
+      # 如果还在运行，强制杀死
+      if kill -0 "${router_pid}" 2>/dev/null; then
+        kill -KILL "${router_pid}" 2>/dev/null || true
+      fi
+    fi
+    rm -f /tmp/audioctl_router.pid
+  fi
+
+  # 杀死任何残留的 audioctl 进程
+  local audioctl_pids
+  audioctl_pids="$(pgrep -f 'audioctl internal-route' 2>/dev/null)" || true
+  if [[ -n "${audioctl_pids}" ]]; then
+    log_warn "发现残留 audioctl 进程，正在清理..."
+    echo "${audioctl_pids}" | xargs -I {} kill -TERM {} 2>/dev/null || true
+    sleep 1
+    # 强制清理
+    audioctl_pids="$(pgrep -f 'audioctl internal-route' 2>/dev/null)" || true
+    if [[ -n "${audioctl_pids}" ]]; then
+      echo "${audioctl_pids}" | xargs -I {} kill -KILL {} 2>/dev/null || true
+    fi
+  fi
+
+  # 清理共享内存（如果存在）
+  local shm_id
+  shm_id="$(ipcs -m 2>/dev/null | grep "0x564f4c00" | awk '{print $2}')" || true
+  if [[ -n "${shm_id}" ]]; then
+    log_info "清理共享内存..."
+    ipcrm -m "${shm_id}" 2>/dev/null || true
+  fi
+
+  log_success "进程清理完成"
+}
+
 coreaudio_kickstart_once() {
   if [[ "${RESTART_COREAUDIO}" != "true" ]]; then
     log_warn "跳过 CoreAudio 重启 (--no-coreaudio-restart)"
     return 0
   fi
+
+  # 在重启前先清理所有相关进程
+  kill_audioctl_processes
+
   log_info "重启 CoreAudio（仅一次）..."
   sudo /bin/launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true
 }
@@ -204,10 +252,10 @@ cmd_install() {
 
   /bin/mkdir -p "${BUILD_DIR}"
   cmake -S "${PROJECT_DIR}" -B "${BUILD_DIR}" -G Ninja -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
-  
+
   log_info "构建音频驱动..."
   cmake --build "${BUILD_DIR}" --target virtual_audio_driver -j "${PARALLEL_JOBS}"
-  
+
   log_info "构建 audioctl 工具..."
   cmake --build "${BUILD_DIR}" --target audioctl -j "${PARALLEL_JOBS}"
 
@@ -215,7 +263,7 @@ cmd_install() {
 
   log_success "安装完成"
   log_info "驱动已安装到: ${DRIVER_DST}"
-  
+
   # 显示 audioctl 使用提示
   if [[ -f "${BUILD_DIR}/bin/audioctl" ]]; then
     log_info "audioctl 工具: ${BUILD_DIR}/bin/audioctl"
@@ -232,6 +280,22 @@ cmd_install() {
 
 cmd_uninstall() {
   log_step "卸载"
+
+  # 先清理进程
+  kill_audioctl_processes
+
+  # 尝试恢复到物理设备（如果虚拟设备当前是默认设备）
+  local current_default
+  current_default="$(system_profiler SPAudioDataType 2>/dev/null | grep -A 5 "Default Output" | grep "Device:" | head -1)" || true
+  if [[ "${current_default}" == *"Virtual"* ]] || [[ "${current_default}" == *"audioctl"* ]]; then
+    log_warn "虚拟设备当前是默认设备，尝试恢复物理设备..."
+    # 尝试使用 audioctl 恢复
+    if [[ -f "${BUILD_DIR:-${PROJECT_DIR}/cmake-build-debug}/bin/audioctl" ]]; then
+      "${BUILD_DIR:-${PROJECT_DIR}/cmake-build-debug}/bin/audioctl" use-physical 2>/dev/null || true
+    fi
+    sleep 1
+  fi
+
   if [[ -d "${DRIVER_DST}" ]]; then
     log_info "删除: ${DRIVER_DST}"
     sudo /bin/rm -rf "${DRIVER_DST}"

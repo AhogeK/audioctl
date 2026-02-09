@@ -89,10 +89,109 @@ static OSStatus ioProc(AudioDeviceID __unused inDevice,
     return status;
 }
 
+static void safe_sleep_ms(long ms)
+{
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000;
+    nanosleep(&ts, NULL);
+}
+
+static bool monitor_router_device(AudioDeviceID aggDevice)
+{
+    int consecutiveErrors = 0;
+
+    while (g_running)
+    {
+        // 检查 Aggregate Device 是否仍然有效且是活动的
+        if (!aggregate_device_is_active())
+        {
+            printf("Router: Aggregate Device became inactive.\n");
+            return false;
+        }
+
+        // 尝试获取设备属性来检测 coreaudiod 是否还活着
+        AudioObjectPropertyAddress addr = {
+            kAudioObjectPropertyName,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain
+        };
+        CFStringRef nameRef = NULL;
+        UInt32 dataSize = sizeof(CFStringRef);
+        OSStatus checkStatus = AudioObjectGetPropertyData(aggDevice, &addr, 0, NULL, &dataSize, &nameRef);
+
+        if (checkStatus != noErr)
+        {
+            const int MAX_CONSECUTIVE_ERRORS = 5;
+            consecutiveErrors++;
+            fprintf(stderr, "Router: Warning - cannot communicate with coreaudiod (error %d), attempt %d/%d\n",
+                    checkStatus, consecutiveErrors, MAX_CONSECUTIVE_ERRORS);
+
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS)
+            {
+                fprintf(stderr, "Router: coreaudiod appears to be restarting, disconnecting...\n");
+                return false;
+            }
+        }
+        else
+        {
+            if (nameRef) CFRelease(nameRef);
+            consecutiveErrors = 0;
+        }
+
+        sleep(1);
+    }
+    return true;
+}
+
+static void attach_and_run_router(AudioDeviceID aggDevice)
+{
+    AudioDeviceIOProcID ioProcID = NULL;
+    OSStatus status = AudioDeviceCreateIOProcID(aggDevice, &ioProc, NULL, &ioProcID);
+    if (status != noErr)
+    {
+        fprintf(stderr, "Router: CreateIOProc failed: %d. Retrying...\n", status);
+        sleep(2);
+        return;
+    }
+
+    status = AudioDeviceStart(aggDevice, ioProcID);
+    if (status != noErr)
+    {
+        fprintf(stderr, "Router: StartIO failed: %d\n", status);
+        AudioDeviceDestroyIOProcID(aggDevice, ioProcID);
+        sleep(2);
+        return;
+    }
+
+    printf("Router: Routing Active.\n");
+
+    monitor_router_device(aggDevice);
+
+    // 安全地停止和销毁 IOProc
+    printf("Router: Stopping IOProc...\n");
+    OSStatus stopStatus = AudioDeviceStop(aggDevice, ioProcID);
+    if (stopStatus != noErr)
+    {
+        fprintf(stderr, "Router: Warning - AudioDeviceStop returned %d\n", stopStatus);
+    }
+
+    // 添加短暂延迟，确保 coreaudiod 完成清理
+    safe_sleep_ms(100); // 100ms
+
+    OSStatus destroyStatus = AudioDeviceDestroyIOProcID(aggDevice, ioProcID);
+    if (destroyStatus != noErr)
+    {
+        fprintf(stderr, "Router: Warning - AudioDeviceDestroyIOProcID returned %d\n", destroyStatus);
+    }
+}
+
 void start_router_loop(void)
 {
     signal(SIGTERM, signal_handler);
     signal(SIGINT, signal_handler);
+    // 忽略 SIGPIPE，防止 coreaudiod 断开时进程崩溃
+    signal(SIGPIPE, SIG_IGN);
 
     printf("Router: Starting router loop...\n");
 
@@ -106,47 +205,14 @@ void start_router_loop(void)
             continue;
         }
 
-        AudioDeviceID aggDevice = aggInfo.deviceId;
-        printf("Router: Attached to Device ID %d\n", aggDevice);
-
-        AudioDeviceIOProcID ioProcID = NULL;
-        OSStatus status = AudioDeviceCreateIOProcID(aggDevice, &ioProc, NULL, &ioProcID);
-        if (status != noErr)
-        {
-            fprintf(stderr, "Router: CreateIOProc failed: %d. Retrying...\n", status);
-            sleep(2);
-            continue;
-        }
-
-        status = AudioDeviceStart(aggDevice, ioProcID);
-        if (status != noErr)
-        {
-            fprintf(stderr, "Router: StartIO failed: %d\n", status);
-            AudioDeviceDestroyIOProcID(aggDevice, ioProcID);
-            sleep(2);
-            continue;
-        }
-
-        printf("Router: Routing Active.\n");
-
-        while (g_running)
-        {
-            // 检查 Aggregate Device 是否仍然有效且是活动的
-            if (!aggregate_device_is_active())
-            {
-                printf("Router: Aggregate Device became inactive.\n");
-                break;
-            }
-            sleep(1);
-        }
-
-        AudioDeviceStop(aggDevice, ioProcID);
-        AudioDeviceDestroyIOProcID(aggDevice, ioProcID);
+        printf("Router: Attached to Device ID %d\n", aggInfo.deviceId);
+        attach_and_run_router(aggInfo.deviceId);
 
         if (g_running)
         {
             printf("Router: Attempting to restart routing...\n");
-            sleep(1);
+            // 增加等待时间，让 coreaudiod 完全恢复
+            sleep(3);
         }
     }
 

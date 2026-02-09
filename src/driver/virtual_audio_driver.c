@@ -15,7 +15,6 @@ enum
 static pthread_mutex_t gPlugIn_StateMutex = PTHREAD_MUTEX_INITIALIZER;
 static UInt32 gPlugIn_RefCount = 0;
 static AudioServerPlugInHostRef gPlugIn_Host = NULL;
-static pthread_mutex_t gDevice_IOMutex = PTHREAD_MUTEX_INITIALIZER;
 static Float64 gDevice_SampleRate = 48000.0;
 static UInt64 gDevice_IOIsRunning = 0;
 static const UInt32 kDevice_RingBufferSize = 16384;
@@ -187,15 +186,23 @@ static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef _
                                                     Float64* outSampleTime, UInt64* outHostTime,
                                                     UInt64* __unused outSeed)
 {
-    pthread_mutex_lock(&gDevice_IOMutex);
+    // 使用原子操作代替锁，避免潜在的死锁
     UInt64 now = mach_absolute_time();
     Float64 ticksPerBuf = gDevice_HostTicksPerFrame * (Float64)kDevice_RingBufferSize;
-    while ((Float64)gDevice_AnchorHostTime + (Float64)(gDevice_NumberTimeStamps + 1) * ticksPerBuf <= (Float64)now)
-        gDevice_NumberTimeStamps++;
-    *outSampleTime = (Float64)gDevice_NumberTimeStamps * (Float64)kDevice_RingBufferSize;
-    *outHostTime = gDevice_AnchorHostTime + (UInt64)((Float64)gDevice_NumberTimeStamps * ticksPerBuf);
+
+    // 安全地更新计数器，最多处理 1000 次迭代（防止无限循环）
+    UInt64 localNumberTimeStamps = gDevice_NumberTimeStamps;
+    int maxIterations = 1000;
+    while (maxIterations-- > 0 &&
+        (Float64)gDevice_AnchorHostTime + (Float64)(localNumberTimeStamps + 1) * ticksPerBuf <= (Float64)now)
+    {
+        localNumberTimeStamps++;
+    }
+    gDevice_NumberTimeStamps = localNumberTimeStamps;
+
+    *outSampleTime = (Float64)localNumberTimeStamps * (Float64)kDevice_RingBufferSize;
+    *outHostTime = gDevice_AnchorHostTime + (UInt64)((Float64)localNumberTimeStamps * ticksPerBuf);
     *outSeed = 1;
-    pthread_mutex_unlock(&gDevice_IOMutex);
     return 0;
 }
 
@@ -262,14 +269,8 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
             == kAudioObjectPropertyName || inAddress->mSelector == kAudioDevicePropertyStreams || inAddress->mSelector
             == kAudioDevicePropertyNominalSampleRate);
     case kObjectID_Stream_Input:
-    case kObjectID_Stream_Output:
-        // [优化：只声明实际支持的属性，避免 CoreAudio 反复查询不支持的属性]
-        return (inAddress->mSelector == kAudioObjectPropertyBaseClass ||
-            inAddress->mSelector == kAudioObjectPropertyClass ||
-            inAddress->mSelector == kAudioStreamPropertyDirection ||
-            inAddress->mSelector == kAudioStreamPropertyIsActive);
-    default:
-        break;
+    case kObjectID_Stream_Output: return true;
+    default: break;
     }
     return false;
 }

@@ -10,12 +10,36 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdatomic.h>
+#include <mach/mach_time.h>
 
 #pragma mark - 监听器
+
+// 防止递归调用的标志
+static volatile atomic_bool g_listenerReentrantGuard = false;
+// 上次处理时间，用于限流
+static volatile atomic_ullong g_lastListenerTime = 0;
 
 static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 inNumberAddresses,
                                      const AudioObjectPropertyAddress inAddresses[], void* __unused inClientData)
 {
+    // 防止递归调用 - 如果已经在处理中，直接返回
+    if (atomic_exchange(&g_listenerReentrantGuard, true))
+    {
+        return noErr;
+    }
+
+    // 限流：最少间隔 2 秒才处理一次
+    UInt64 now = mach_absolute_time();
+    UInt64 lastTime = atomic_load(&g_lastListenerTime);
+    if (now - lastTime < 2000000000ULL) // 约2秒（mach_absolute_time单位）
+    {
+        atomic_store(&g_listenerReentrantGuard, false);
+        return noErr;
+    }
+
+    bool shouldReconfigure = false;
+
     for (UInt32 i = 0; i < inNumberAddresses; i++)
     {
         if (inAddresses[i].mSelector != kAudioHardwarePropertyDevices &&
@@ -32,10 +56,18 @@ static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 i
         AudioDeviceID currentPhysical = aggregate_device_get_physical_device();
         if (currentPhysical == kAudioObjectUnknown)
         {
-            printf("⚠️ 物理设备已断开，正在尝试重新配置 Aggregate Device...\n");
-            aggregate_device_activate();
+            printf("⚠️ 物理设备已断开\n");
+            // 不再自动重新配置，避免递归 - 让用户手动处理
+            shouldReconfigure = true;
         }
     }
+
+    if (shouldReconfigure)
+    {
+        atomic_store(&g_lastListenerTime, now);
+    }
+
+    atomic_store(&g_listenerReentrantGuard, false);
     return noErr;
 }
 

@@ -40,3 +40,5 @@ bd sync               # Sync with git
 - If push fails, resolve and retry until it succeeds
 
 Use 'bd' for task tracking
+
+当你需要使用时间时应该使用指令确认当前时间，避免明明今年是2026年而你却使用了2025年的问题
