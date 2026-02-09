@@ -267,7 +267,7 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
     case kObjectID_Device: return (inAddress->mSelector == kAudioObjectPropertyBaseClass || inAddress->mSelector ==
             kAudioObjectPropertyClass || inAddress->mSelector == kAudioDevicePropertyDeviceUID || inAddress->mSelector
             == kAudioObjectPropertyName || inAddress->mSelector == kAudioDevicePropertyStreams || inAddress->mSelector
-            == kAudioDevicePropertyNominalSampleRate);
+            == kAudioDevicePropertyNominalSampleRate || inAddress->mSelector == kAudioDevicePropertyIcon);
     case kObjectID_Stream_Input:
     case kObjectID_Stream_Output: return true;
     default: break;
@@ -300,6 +300,8 @@ static OSStatus VirtualAudioDriver_GetPropertyDataSize(AudioServerPlugInDriverRe
     else if (inAddress->mSelector == kAudioDevicePropertyDeviceUID || inAddress->mSelector == kAudioObjectPropertyName
         || inAddress->mSelector == kAudioObjectPropertyManufacturer)
         *outDataSize = sizeof(CFStringRef);
+    else if (inObjectID == kObjectID_Device && inAddress->mSelector == kAudioDevicePropertyIcon)
+        *outDataSize = sizeof(CFURLRef);
     else *outDataSize = sizeof(UInt32);
     return 0;
 }
@@ -361,6 +363,16 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
         case kAudioDevicePropertyDeviceIsRunning: *((UInt32*)outData) = (gDevice_IOIsRunning > 0) ? 1 : 0;
             *outDataSize = sizeof(UInt32);
             break;
+        case kAudioDevicePropertyIcon:
+            {
+                // 获取插件 bundle 的路径
+                CFStringRef iconPath = CFSTR(
+                    "/Library/Audio/Plug-Ins/HAL/VirtualAudioDriver.driver/Contents/Resources/DeviceIcon.icns");
+                CFURLRef iconURL = CFURLCreateWithFileSystemPath(NULL, iconPath, kCFURLPOSIXPathStyle, false);
+                *((CFURLRef*)outData) = iconURL;
+                *outDataSize = sizeof(CFURLRef);
+                break;
+            }
         default: break;
         }
     }
