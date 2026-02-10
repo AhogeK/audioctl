@@ -46,53 +46,6 @@ Agent 必须在 `/devlog` 目录下维护实时日志。**所有描述必须使�
 
 ---
 
-## 🔨 构建与测试指令
-
-### 构建命令 (Build Commands)
-
-```bash
-# Debug 模式构建 (默认)
-mkdir -p cmake-build-debug
-cd cmake-build-debug
-cmake .. -DDEBUG_MODE=ON
-ninja
-
-# Release 模式构建
-mkdir -p cmake-build-release
-cd cmake-build-release
-cmake .. -DDEBUG_MODE=OFF
-ninja
-
-# 一键安装脚本
-./scripts/install.sh install
-./scripts/install.sh install --release
-```
-
-### 测试命令 (Test Commands)
-
-```bash
-# 运行所有测试
-cd cmake-build-debug
-ninja test
-
-# 或使用 ctest
-ctest
-
-# 运行单个测试 (注意: 项目使用统一的测试可执行文件)
-cd cmake-build-debug/tests
-./test_virtual_audio_device
-```
-
-### 安装与部署
-
-```bash
-# 安装驱动到系统
-sudo ninja install
-sudo launchctl kickstart -k system/com.apple.audio.coreaudiod
-```
-
----
-
 ## 📝 代码风格指南
 
 ### 语言标准
@@ -100,14 +53,6 @@ sudo launchctl kickstart -k system/com.apple.audio.coreaudiod
 - **C 标准**: C11 (`CMAKE_C_STANDARD 11`)
 - **Objective-C 标准**: C11 (`CMAKE_OBJC_STANDARD 11`)
 - **ARC**: Objective-C 代码启用 `-fobjc-arc`
-
-### 编译警告
-
-始终启用严格警告:
-
-```cmake
-add_compile_options(-Wall -Wextra)
-```
 
 ### 代码格式规范
 
@@ -237,11 +182,6 @@ static OSStatus getAudioProperty(AudioDeviceID deviceId, ...)
 
 * **遗留扫描**: 为任何未完成的子任务或待优化的代码块创建新的 `bd` Issue。
 * **质量门控**: 必须运行现有的测试套件和构建，确保交付的代码是健康的。
-    ```bash
-    cd cmake-build-debug
-    ninja
-    ninja test
-    ```
 * **日志落盘**: 根据当前任务类型，在 `/devlog` 中同步更新日志文件，文件名需严格基于系统实时时间。
 * **禁止强制推送**: 代码的提交推送这一步交给用户，用户需要先review你的代码才行，除非用户主动提出直接提交推送PR等这类操作的请求。
 * **环境净空**: 清理 Stash 缓存，剪枝已失效的远程分支，确保工作区整洁。
@@ -252,7 +192,6 @@ static OSStatus getAudioProperty(AudioDeviceID deviceId, ...)
 ## 🚫 关键约束 (Critical Rules)
 
 * **动态时间前置**: 任何涉及日期的输出，必须以 `date` 指令的结果为准，拒绝 hardcode。
-* **拒绝“推迟推送”**: 禁止向用户发送“我已准备好推送”等确认请求，Agent 应具备自主解决简单冲突并完成推送的能力。
 * **Context-as-Code**: `/devlog` 文件夹不仅是日志，更是 Agent 跨 Session 维持长期记忆的核心资产。
 * **专业表达**: 使用地道的简体中文进行技术描述，确保文档的工程严谨性。
-* **必须构建和测试**: 每次代码变更后必须执行 `ninja` 和 `ninja test`。
+* **必须构建和测试**: 每次代码变更后必须进行严格的构建与测试。
