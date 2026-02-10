@@ -15,14 +15,16 @@
 #include <sys/file.h>
 #include <mach-o/dyld.h>
 
-// 路由进程 PID 文件
-#define ROUTER_PID_FILE "/tmp/audioctl_router.pid"
-#define ROUTER_LOCK_FILE "/tmp/audioctl_router.lock"
-
 static void kill_router(void)
 {
+    char pid_path[PATH_MAX];
+    char lock_path[PATH_MAX];
+
+    if (get_pid_file_path(pid_path, sizeof(pid_path)) != 0) return;
+    if (get_lock_file_path(lock_path, sizeof(lock_path)) != 0) return;
+
     // 1. 尝试通过 PID 文件停止
-    FILE* fp = fopen(ROUTER_PID_FILE, "r");
+    FILE* fp = fopen(pid_path, "r");
     if (fp != NULL)
     {
         char buf[32];
@@ -36,15 +38,14 @@ static void kill_router(void)
             }
         }
         fclose(fp);
-        unlink(ROUTER_PID_FILE);
+        unlink(pid_path);
     }
 
     // 2. 安全网：强制清理可能残留的进程（防止 PID 文件丢失导致多重启动）
-    // 忽略错误，仅仅作为兜底机制
     system("pkill -f 'audioctl internal-route' >/dev/null 2>&1");
 
     // 3. 清理锁文件（如果存在）
-    unlink(ROUTER_LOCK_FILE);
+    unlink(lock_path);
 }
 
 void spawn_router(const char* self_path)
@@ -66,11 +67,15 @@ void spawn_router(const char* self_path)
     else if (pid > 0)
     {
         // Parent
-        FILE* fp = fopen(ROUTER_PID_FILE, "w");
-        if (fp)
+        char pid_path[PATH_MAX];
+        if (get_pid_file_path(pid_path, sizeof(pid_path)) == 0)
         {
-            fprintf(fp, "%d", pid);
-            fclose(fp);
+            FILE* fp = fopen(pid_path, "w");
+            if (fp)
+            {
+                fprintf(fp, "%d\n", pid);
+                fclose(fp);
+            }
         }
         printf("后台音频路由已启动 (PID: %d)\n", pid);
     }
@@ -831,8 +836,15 @@ int main(const int argc, char* argv[])
 
     if (strcmp(cmd, "internal-route") == 0)
     {
+        char lock_path[PATH_MAX];
+        if (get_lock_file_path(lock_path, sizeof(lock_path)) != 0)
+        {
+            fprintf(stderr, "❌ 无法获取锁文件路径\n");
+            return 1;
+        }
+
         // 单例检查：确保同一时间只有一个 internal-route 在运行
-        int lock_fd = open(ROUTER_LOCK_FILE, O_RDWR | O_CREAT, 0666);
+        int lock_fd = open(lock_path, O_RDWR | O_CREAT, 0666);
         if (lock_fd < 0)
         {
             fprintf(stderr, "❌ 无法打开锁文件: %s\n", strerror(errno));
@@ -858,7 +870,7 @@ int main(const int argc, char* argv[])
         aggregate_device_cleanup();
 
         // 退出前清理锁文件
-        unlink(ROUTER_LOCK_FILE);
+        unlink(lock_path);
         return 0;
     }
 

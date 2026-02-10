@@ -81,6 +81,30 @@ audioctl set -i 75
 audioctl set 117
 ```
 
+### 服务管理
+
+audioctl 提供后台服务管理功能，用于维护音频路由进程。服务状态文件存储在 `~/Library/Application Support/audioctl/` 目录下。
+
+```bash
+# 启动服务（不需要 sudo，普通用户权限即可）
+audioctl --start-service
+
+# 停止服务
+audioctl --stop-service
+
+# 重启服务
+audioctl --restart-service
+
+# 查看服务状态
+audioctl --service-status
+```
+
+**服务管理说明**：
+
+- 服务状态文件存储在用户目录下，不需要 root 权限
+- 使用 `use-virtual` 命令时会自动启动服务
+- 使用 `use-physical` 命令时会自动停止服务
+
 ### 虚拟设备与 Aggregate Device
 
 **Aggregate Device** 是 macOS 的音频设备聚合技术，它将虚拟设备和物理设备组合在一起：
@@ -157,6 +181,7 @@ Aggregate Device 音频路径：
 | **Aggregate Device**       | `aggregate_device_manager.c` | 系统级设备聚合，路由音频到物理设备    |
 | **App Volume Control**     | `app_volume_control.c`       | 管理应用音量设置，提供 CLI      |
 | **Virtual Device Manager** | `virtual_device_manager.c`   | 检测虚拟设备状态、切换设备        |
+| **Service Manager**        | `service_manager.c`          | 后台服务管理，进程生命周期控制      |
 
 ### 工作流程
 
@@ -164,8 +189,9 @@ Aggregate Device 音频路径：
 2. **创建 Aggregate**: `use-virtual` 创建 Aggregate Device，包含：
     - 虚拟设备（主设备，接收所有音频）
     - 物理设备（时钟主设备，实际输出）
-3. **音频流**: 系统 → 虚拟设备 → 应用音量处理 → 物理设备
-4. **音量控制**: 驱动根据 PID 从共享内存读取音量并应用
+3. **启动服务**: 自动启动后台路由进程，PID 文件保存在 `~/Library/Application Support/audioctl/`
+4. **音频流**: 系统 → 虚拟设备 → 应用音量处理 → 物理设备
+5. **音量控制**: 驱动根据 PID 从共享内存读取音量并应用
 
 ### 为什么需要 Aggregate Device
 
