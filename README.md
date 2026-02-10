@@ -25,19 +25,22 @@ cd audioctl
 ./scripts/install.sh install --release
 
 # 添加到 PATH
-echo 'export PATH="'$(pwd)'/cmake-build-Debug/bin:$PATH"' >> ~/.zshrc
+echo 'export PATH="'$(pwd)'/cmake-build-debug/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-### 手动安装
+### 卸载
 
 ```bash
-mkdir -p cmake-build-debug
-cd cmake-build-debug
-cmake ..
-ninja
-sudo ninja install
-sudo launchctl kickstart -k system/com.apple.audio.coreaudiod
+# 一键卸载（自动恢复物理设备、删除驱动和聚合设备）
+./scripts/install.sh uninstall
+```
+
+### 开发构建
+
+```bash
+# 仅构建不重启 CoreAudio（适合开发调试）
+./scripts/install.sh install --no-coreaudio-restart
 ```
 
 ## 使用说明
@@ -51,12 +54,12 @@ audioctl virtual-status
 # 2. 检查 Aggregate Device 状态（音频路由）
 audioctl agg-status
 
-# 3. 切换到虚拟设备（自动创建 Aggregate Device）
+# 3. 切换到虚拟设备（自动创建 Aggregate Device 并路由音频）
+# 首次运行会自动启动后台路由进程
 audioctl use-virtual
 
-# 4. 现在可以控制应用音量了
-audioctl app-volumes
-audioctl app-volume Safari 50
+# 4. 恢复物理设备（停止路由进程，恢复系统默认输出）
+audioctl use-physical
 ```
 
 ### 基础命令
@@ -159,8 +162,8 @@ Aggregate Device 音频路径：
 
 1. **安装驱动**: 虚拟驱动安装到 `/Library/Audio/Plug-Ins/HAL/`
 2. **创建 Aggregate**: `use-virtual` 创建 Aggregate Device，包含：
-   - 虚拟设备（主设备，接收所有音频）
-   - 物理设备（时钟主设备，实际输出）
+    - 虚拟设备（主设备，接收所有音频）
+    - 物理设备（时钟主设备，实际输出）
 3. **音频流**: 系统 → 虚拟设备 → 应用音量处理 → 物理设备
 4. **音量控制**: 驱动根据 PID 从共享内存读取音量并应用
 

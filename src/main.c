@@ -7,32 +7,44 @@
 #include "aggregate_device_manager.h"
 #include "audio_router.h"
 #include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/file.h>
 #include <mach-o/dyld.h>
 
 // 路由进程 PID 文件
 #define ROUTER_PID_FILE "/tmp/audioctl_router.pid"
+#define ROUTER_LOCK_FILE "/tmp/audioctl_router.lock"
 
 static void kill_router(void)
 {
+    // 1. 尝试通过 PID 文件停止
     FILE* fp = fopen(ROUTER_PID_FILE, "r");
-    if (fp == NULL)
+    if (fp != NULL)
     {
-        return;
-    }
-
-    char buf[32];
-    if (fgets(buf, sizeof(buf), fp) != NULL)
-    {
-        char* endptr = NULL;
-        long pid = strtol(buf, &endptr, 10);
-        if (pid > 0 && pid <= INT32_MAX)
+        char buf[32];
+        if (fgets(buf, sizeof(buf), fp) != NULL)
         {
-            kill((pid_t)pid, SIGTERM);
+            char* endptr = NULL;
+            long pid = strtol(buf, &endptr, 10);
+            if (pid > 0 && pid <= INT32_MAX)
+            {
+                kill((pid_t)pid, SIGTERM);
+            }
         }
+        fclose(fp);
+        unlink(ROUTER_PID_FILE);
     }
 
-    fclose(fp);
-    unlink(ROUTER_PID_FILE);
+    // 2. 安全网：强制清理可能残留的进程（防止 PID 文件丢失导致多重启动）
+    // 忽略错误，仅仅作为兜底机制
+    system("pkill -f 'audioctl internal-route' >/dev/null 2>&1");
+
+    // 3. 清理锁文件（如果存在）
+    unlink(ROUTER_LOCK_FILE);
 }
 
 void spawn_router(const char* self_path)
@@ -819,9 +831,34 @@ int main(const int argc, char* argv[])
 
     if (strcmp(cmd, "internal-route") == 0)
     {
+        // 单例检查：确保同一时间只有一个 internal-route 在运行
+        int lock_fd = open(ROUTER_LOCK_FILE, O_RDWR | O_CREAT, 0666);
+        if (lock_fd < 0)
+        {
+            fprintf(stderr, "❌ 无法打开锁文件: %s\n", strerror(errno));
+            return 1;
+        }
+
+        if (flock(lock_fd, LOCK_EX | LOCK_NB) < 0)
+        {
+            fprintf(stderr, "⚠️  Audio Router 已经在运行中 (无法获取锁)\n");
+            close(lock_fd);
+            return 1;
+        }
+
+        // 写入当前 PID 到锁文件 (便于调试，虽主要依赖 flock)
+        char pid_str[32];
+        snprintf(pid_str, sizeof(pid_str), "%d", getpid());
+        ftruncate(lock_fd, 0);
+        write(lock_fd, pid_str, strlen(pid_str));
+        // 注意：不关闭 lock_fd，进程退出时系统会自动释放锁
+
         aggregate_device_init();
         start_router_loop();
         aggregate_device_cleanup();
+
+        // 退出前清理锁文件
+        unlink(ROUTER_LOCK_FILE);
         return 0;
     }
 
