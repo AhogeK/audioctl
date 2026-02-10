@@ -205,6 +205,6 @@ tags
 [._]*.un~
 
 # personal
-devlog.md
+devlog
 todolist.md
 BUGFIX*.md

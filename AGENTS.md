@@ -1,44 +1,69 @@
-# Agent Instructions
+# 🤖 Agent 开发架构与执行协议 (AGENTS.md)
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+本文件定义了项目开发的核心工作流。它融合了任务追踪（bd）、动态日志系统（DevLog）以及严格的 Git 交付闭环。
 
-## Quick Reference
+---
 
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
-```
+## 🕒 时间与上下文真实性 (Time Integrity)
 
-## Landing the Plane (Session Completion)
+> ⚠️ **核心准则**：严禁在日志命名或内容中使用“记忆中”的年份。
+>
+> 在创建任何带有时间戳的文件（如 `BUGFIX_YYYY_MM_DD.md`）之前，Agent **必须**首先执行系统指令（如 `date` 或特定 Shell
+> 指令）以获取当前的绝对真实时间。
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+---
 
-**MANDATORY WORKFLOW:**
+## 🏗 任务追踪指令参考 (Issue Tracking)
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+项目使用 **bd** (beads) 系统作为唯一的任务状态真理来源。
 
-**CRITICAL RULES:**
+* **`bd onboard`**: 初始化项目协作环境。
+* **`bd ready`**: 检索当前可执行的待办事项。
+* **`bd show <id>`**: 深度解析特定任务的需求背景。
+* **`bd update <id> --status in_progress`**: 正式激活任务并锁定开发权。
+* **`bd close <id>`**: 完成任务，触发后续归档流程。
+* **`bd sync`**: 强制同步本地任务状态至远端。
 
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+---
 
-Use 'bd' for task tracking
+## 📂 结构化开发日志协议 (DevLog Protocol)
 
-当你需要使用时间时应该使用指令确认当前时间，避免明明今年是2026年而你却使用了2025年的问题
+Agent 必须在 `/devlog` 目录下维护实时日志。**所有描述必须使用简体中文。**
+
+### 1. 增量功能日志 (`devlog/activity/`)
+
+* **触发条件**: 功能迭代、架构优化、依赖库变更。
+* **命名规范**: `ACTIVITY_[系统指令获取的日期].md`
+* **关键内容**: 变更动机、技术选型（如为何引入特定 MCP Server）、受影响的组件、待解决的边缘问题。
+
+### 2. 故障修复日志 (`devlog/fix/`)
+
+* **触发条件**: 逻辑漏洞修复、性能调优、RAG 幻觉修正。
+* **命名规范**: `FIX_[系统指令获取的日期].md`
+* **关键内容**: 场景复现路径、根因分析 (Root Cause)、补丁逻辑说明、防回归测试方案。
+
+---
+
+## 🚀 任务完结工作流 (Landing the Plane)
+
+**在结束任何工作会话前，必须严格执行以下闭环操作。未完成 `git push` 的任务视为无效。**
+
+* **遗留扫描**: 为任何未完成的子任务或待优化的代码块创建新的 `bd` Issue。
+* **质量门控**: 必须运行现有的测试套件和 Linter，确保交付的代码是健康的。
+* **日志落盘**: 根据当前任务类型，在 `/devlog` 中同步更新日志文件，文件名需严格基于系统实时时间。
+* **强制推送 (MANDATORY)**:
+    * `git pull --rebase`
+    * `bd sync`
+    * `git push`
+    * `git status` (必须确认状态为 "up to date with origin")
+* **环境净空**: 清理 Stash 缓存，剪枝已失效的远程分支，确保工作区整洁。
+* **上下文交接**: 在 Session 结束时提供简洁的下一步建议。
+
+---
+
+## 🚫 关键约束 (Critical Rules)
+
+* **动态时间前置**: 任何涉及日期的输出，必须以 `date` 指令的结果为准，拒绝 hardcode。
+* **拒绝“推迟推送”**: 禁止向用户发送“我已准备好推送”等确认请求，Agent 应具备自主解决简单冲突并完成推送的能力。
+* **Context-as-Code**: `/devlog` 文件夹不仅是日志，更是 Agent 跨 Session 维持长期记忆的核心资产。
+* **专业表达**: 使用地道的简体中文进行技术描述，确保文档的工程严谨性。
