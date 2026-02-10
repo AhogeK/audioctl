@@ -150,6 +150,17 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
     return g_defaultVolume;
 }
 
+// [实时音频路径 - 必须无锁]
+// 此函数在 AudioServerPlugIn 的 IOProc 回调中被调用
+// 时间约束：每 2-10ms 必须完成，严禁：
+//   - 锁操作 (pthread_mutex, atomic 操作是安全的)
+//   - 内存分配
+//   - 系统调用
+//
+// 当前实现：
+//   - 只读取简单的标量变量 g_defaultVolume
+//   - 无需锁保护（标量读取是原子的）
+//   - 时间复杂度 O(n)，n=frameCount*channels，实际处理极快
 void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameCount, UInt32 channels)
 {
     (void)clientID;
@@ -159,9 +170,10 @@ void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameC
         return;
     }
 
+    // 标量读取无需锁（32-bit Float32 在 x86_64/ARM64 上自然对齐，读取是原子的）
     Float32 volume = g_defaultVolume;
 
-    // 如果音量是100%，不需要处理
+    // 如果音量是100%，不需要处理（零成本路径）
     if (volume >= 0.999f)
     {
         return;
@@ -171,6 +183,7 @@ void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameC
     Float32* samples = (Float32*)buffer;
     UInt32 totalSamples = frameCount * channels;
 
+    // 简单标量乘法，SIMD 友好的循环
     for (UInt32 i = 0; i < totalSamples; i++)
     {
         samples[i] *= volume;

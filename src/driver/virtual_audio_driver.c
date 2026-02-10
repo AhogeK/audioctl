@@ -237,10 +237,21 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
         Float32* buf = (Float32*)ioMainBuffer;
         UInt32 frames = (inIOBufferFrameSize > RING_BUFFER_FRAMES) ? RING_BUFFER_FRAMES : inIOBufferFrameSize;
 
-        // 应用音量控制
+        // [实时音频路径 - 热路径 Hot Path]
+        // 每 2-10ms 调用一次，严禁以下操作：
+        //   - 内存分配 (malloc/free)
+        //   - 锁操作 (pthread_mutex_lock 等)
+        //   - 系统调用 (文件 I/O, 日志输出等)
+        //
+        // 当前实现确保：
+        //   - app_volume_driver_apply_volume 只读取共享内存音量表
+        //   - 无锁设计，直接读取原子变量 g_defaultVolume
+        //   - 简单标量乘法，耗时极短
         app_volume_driver_apply_volume(inClientID, buf, frames, 2);
 
-        // 保存到环形缓冲区（用于监控/调试，实际输出由系统处理）
+        // [调试] 音频监控环形缓冲区 - 仅 DEBUG 模式启用
+        // 注意：此操作消耗内存带宽，生产环境应禁用
+#ifdef DEBUG
         static UInt32 writePos = 0;
         for (UInt32 f = 0; f < frames; f++)
         {
@@ -249,6 +260,7 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
             gRingBuffer[p + 1] = buf[f * 2 + 1];
         }
         writePos = (writePos + frames) % RING_BUFFER_FRAMES;
+#endif
     }
 
     return 0;
