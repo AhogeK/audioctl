@@ -150,8 +150,10 @@ install(TARGETS virtual_audio_driver
         BUNDLE DESTINATION "/Library/Audio/Plug-Ins/HAL"
 )
 
-# 添加安装后脚本
-install(CODE "execute_process(COMMAND sudo launchctl kickstart -k system/com.apple.audio.coreaudiod)")
+# ⚠️ 注意：不在这里自动重启 CoreAudio，因为这会中断用户的音频会话
+# 请使用 install.sh 脚本进行安装，它会提供详细的警告和确认提示
+# 或手动重启：sudo launchctl kickstart -k system/com.apple.audio.coreaudiod
+# install(CODE "execute_process(COMMAND sudo launchctl kickstart -k system/com.apple.audio.coreaudiod)")
 
 # 生成 compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

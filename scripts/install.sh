@@ -117,9 +117,88 @@ kill_audioctl_processes() {
   log_success "进程清理完成"
 }
 
+# 检查是否有音频应用正在运行
+check_running_audio_apps() {
+  local apps=""
+
+  # 检查常见音频应用
+  local audio_apps=(
+    "Music"
+    "Spotify"
+    "Logic Pro"
+    "Logic Pro X"
+    "GarageBand"
+    "Zoom"
+    "FaceTime"
+    "QuickTime Player"
+    "VLC"
+    "IINA"
+    "Safari"
+    "Chrome"
+  )
+
+  for app in "${audio_apps[@]}"; do
+    if pgrep -x "${app}" >/dev/null 2>&1 || pgrep -f "${app}" >/dev/null 2>&1; then
+      apps="${apps}${app}, "
+    fi
+  done
+
+  # 去除末尾的逗号和空格
+  apps="${apps%, }"
+
+  if [[ -n "${apps}" ]]; then
+    echo "${apps}"
+    return 0
+  fi
+
+  return 1
+}
+
 coreaudio_kickstart_once() {
   if [[ "${RESTART_COREAUDIO}" != "true" ]]; then
     log_warn "跳过 CoreAudio 重启 (--no-coreaudio-restart)"
+    return 0
+  fi
+
+  # ⚠️ 强烈警告：CoreAudio 重启会中断所有音频
+  echo ""
+  log_warn "═══════════════════════════════════════════════════════════"
+  log_warn "⚠️  警告：即将重启 CoreAudio 服务"
+  log_warn "═══════════════════════════════════════════════════════════"
+  log_warn ""
+  log_warn "这将强制终止所有正在进行的音频会话，包括："
+  log_warn "  • 正在播放的音乐或视频（Music, Spotify, VLC 等）"
+  log_warn "  • 正在进行的视频通话（Zoom, FaceTime 等）"
+  log_warn "  • 正在录音的音频软件（Logic Pro, GarageBand 等）"
+  log_warn "  • 浏览器中的音频/视频播放"
+  log_warn ""
+
+  # 检测正在运行的音频应用
+  local running_apps
+  if running_apps=$(check_running_audio_apps); then
+    log_warn "检测到以下音频相关应用正在运行："
+    log_warn "  ${running_apps}"
+    log_warn ""
+  fi
+
+  log_warn "这些应用将在重启后恢复，但当前会话会被中断！"
+  log_warn ""
+  log_warn "建议操作："
+  log_warn "  • 先手动暂停或保存您的工作"
+  log_warn "  • 或使用 --no-coreaudio-restart 参数跳过重启"
+  log_warn "  • 稍后手动运行：sudo launchctl kickstart -k system/com.apple.audio.coreaudiod"
+  log_warn "═══════════════════════════════════════════════════════════"
+  echo ""
+
+  # 要求用户确认
+  local confirm
+  echo -n "是否确认重启 CoreAudio? [y/N] "
+  read -r confirm
+
+  if [[ ! "${confirm}" =~ ^[Yy]$ ]]; then
+    log_info "已取消 CoreAudio 重启"
+    log_info "注意：驱动已安装，但需要重启 CoreAudio 才能生效"
+    log_info "您可以稍后手动重启：sudo launchctl kickstart -k system/com.apple.audio.coreaudiod"
     return 0
   fi
 
