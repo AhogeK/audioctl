@@ -332,8 +332,17 @@ static void get_physical_device_name_from_aggregate(char* outName, size_t nameSi
 
 OSStatus aggregate_device_activate(void)
 {
+    // 获取当前默认输出设备，用于显示信息
+    AudioDeviceID originalDefault = aggregate_device_get_current_default_output();
+    char originalName[256] = {0};
+    if (originalDefault != kAudioObjectUnknown)
+    {
+        get_device_name(originalDefault, originalName, sizeof(originalName));
+    }
+
     if (!aggregate_device_is_created())
     {
+        // 传入 kAudioObjectUnknown 让 aggregate_device_create 自动选择合适的物理设备
         OSStatus createStatus = aggregate_device_create(kAudioObjectUnknown);
         if (createStatus != noErr) return createStatus;
     }
@@ -353,6 +362,10 @@ OSStatus aggregate_device_activate(void)
     get_physical_device_name_from_aggregate(physName, sizeof(physName));
 
     printf("✅ Aggregate Device 已设为默认输出\n");
+    if (strlen(originalName) > 0)
+    {
+        printf("   原输出设备: %s\n", originalName);
+    }
     printf("   音频流: 应用 → 虚拟设备(音量控制) → %s\n", physName);
 
     return status;
@@ -360,13 +373,39 @@ OSStatus aggregate_device_activate(void)
 
 OSStatus aggregate_device_deactivate(void)
 {
-    AudioDeviceID physical = aggregate_device_get_recommended_physical_device();
-    if (physical == kAudioObjectUnknown) return kAudioHardwareBadDeviceError;
+    // 优先使用 Aggregate Device 中绑定的物理设备
+    AudioDeviceID physical = aggregate_device_get_physical_device();
+    
+    // 如果 Aggregate Device 不存在或没有绑定物理设备，使用当前默认设备
+    if (physical == kAudioObjectUnknown)
+    {
+        physical = aggregate_device_get_current_default_output();
+    }
+    
+    // 如果当前默认是聚合设备，需要找另一个物理设备
+    if (physical == kAudioObjectUnknown || is_aggregate_device(physical))
+    {
+        physical = aggregate_device_get_recommended_physical_device();
+    }
+    
+    if (physical == kAudioObjectUnknown || is_virtual_device(physical))
+    {
+        return kAudioHardwareBadDeviceError;
+    }
 
     AudioObjectPropertyAddress outAddr = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
-    return AudioObjectSetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, sizeof(AudioDeviceID), &physical);
+    OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, sizeof(AudioDeviceID), &physical);
+    
+    if (status == noErr)
+    {
+        char name[256] = {0};
+        get_device_name(physical, name, sizeof(name));
+        printf("✅ 已恢复到物理设备: %s\n", name);
+    }
+    
+    return status;
 }
 
 bool aggregate_device_is_created(void)
@@ -465,12 +504,45 @@ bool aggregate_device_contains_physical(const AggregateDeviceInfo* info, AudioDe
     return false;
 }
 
+AudioDeviceID aggregate_device_get_current_default_output(void)
+{
+    AudioDeviceID defaultDevice = kAudioObjectUnknown;
+    UInt32 dataSize = sizeof(AudioDeviceID);
+    AudioObjectPropertyAddress propertyAddress = {
+        kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+    };
+    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize, &defaultDevice);
+    if (status != noErr) return kAudioObjectUnknown;
+    return defaultDevice;
+}
+
 AudioDeviceID aggregate_device_get_recommended_physical_device(void)
 {
     AudioDeviceID* devices = NULL;
     UInt32 count = 0;
     if (get_all_devices(&devices, &count) != noErr || devices == NULL) return kAudioObjectUnknown;
 
+    // 首先尝试获取当前默认输出设备
+    AudioDeviceID currentDefault = aggregate_device_get_current_default_output();
+    
+    // 如果当前默认设备是有效的物理设备（不是虚拟设备或聚合设备），优先使用它
+    if (currentDefault != kAudioObjectUnknown && 
+        !is_virtual_device(currentDefault) && 
+        !is_aggregate_device(currentDefault))
+    {
+        // 验证它有输出流
+        AudioObjectPropertyAddress streamAddr = {
+            kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain
+        };
+        UInt32 sz = 0;
+        if (AudioObjectGetPropertyDataSize(currentDefault, &streamAddr, 0, NULL, &sz) == noErr && sz > 0)
+        {
+            free(devices);
+            return currentDefault;
+        }
+    }
+
+    // 如果默认设备不可用，按顺序选择第一个可用物理设备
     AudioDeviceID rec = kAudioObjectUnknown;
     for (UInt32 i = 0; i < count; i++)
     {

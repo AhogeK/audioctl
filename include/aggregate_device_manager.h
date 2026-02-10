@@ -72,7 +72,10 @@ OSStatus aggregate_device_deactivate(void);
 // 打印 Aggregate Device 状态
 void aggregate_device_print_status(void);
 
-// 获取推荐的物理设备（当前默认输出设备，如果是虚拟设备则选其他）
+// 获取当前系统默认输出设备
+AudioDeviceID aggregate_device_get_current_default_output(void);
+
+// 获取推荐的物理设备（优先当前默认输出设备，如果是虚拟/聚合设备则选其他可用设备）
 AudioDeviceID aggregate_device_get_recommended_physical_device(void);
 
 #pragma mark - 辅助功能
