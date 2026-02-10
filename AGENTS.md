@@ -1,6 +1,6 @@
 # 🤖 Agent 开发架构与执行协议 (AGENTS.md)
 
-本文件定义了项目开发的核心工作流。它融合了任务追踪（bd）、动态日志系统（DevLog）以及严格的 Git 交付闭环。
+本文件定义了项目开发的核心工作流。它融合了任务追踪（bd）、动态日志系统（DevLog）。
 
 **⚠️agent 必须使用简体中文跟用户交互！⚠️**
 
@@ -235,8 +235,6 @@ static OSStatus getAudioProperty(AudioDeviceID deviceId, ...)
 
 ## 🚀 任务完结工作流 (Landing the Plane)
 
-**在结束任何工作会话前，必须严格执行以下闭环操作。未完成 `git push` 的任务视为无效。**
-
 * **遗留扫描**: 为任何未完成的子任务或待优化的代码块创建新的 `bd` Issue。
 * **质量门控**: 必须运行现有的测试套件和构建，确保交付的代码是健康的。
     ```bash
@@ -245,11 +243,7 @@ static OSStatus getAudioProperty(AudioDeviceID deviceId, ...)
     ninja test
     ```
 * **日志落盘**: 根据当前任务类型，在 `/devlog` 中同步更新日志文件，文件名需严格基于系统实时时间。
-* **强制推送 (MANDATORY)**:
-    * `git pull --rebase`
-    * `bd sync`
-    * `git push`
-    * `git status` (必须确认状态为 "up to date with origin")
+* **禁止强制推送**: 代码的提交推送这一步交给用户，用户需要先review你的代码才行，除非用户主动提出直接提交推送PR等这类操作的请求。
 * **环境净空**: 清理 Stash 缓存，剪枝已失效的远程分支，确保工作区整洁。
 * **上下文交接**: 在 Session 结束时提供简洁的下一步建议。
 
