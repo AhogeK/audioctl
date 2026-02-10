@@ -340,15 +340,38 @@ OSStatus aggregate_device_activate(void)
         get_device_name(originalDefault, originalName, sizeof(originalName));
     }
 
+    // 如果不存在，先创建
     if (!aggregate_device_is_created())
     {
         // 传入 kAudioObjectUnknown 让 aggregate_device_create 自动选择合适的物理设备
         OSStatus createStatus = aggregate_device_create(kAudioObjectUnknown);
         if (createStatus != noErr) return createStatus;
+        
+        // 【修复】创建后等待系统刷新设备列表
+        // 系统需要时间让新创建的 Aggregate Device 生效
+        usleep(500000); // 500ms
     }
 
-    AudioDeviceID agg = find_aggregate_device();
-    if (agg == kAudioObjectUnknown) return kAudioHardwareBadDeviceError;
+    // 【修复】查找 Aggregate Device，如果找不到则重试几次
+    AudioDeviceID agg = kAudioObjectUnknown;
+    int retryCount = 0;
+    const int maxRetries = 5;
+    
+    while (agg == kAudioObjectUnknown && retryCount < maxRetries)
+    {
+        agg = find_aggregate_device();
+        if (agg == kAudioObjectUnknown)
+        {
+            retryCount++;
+            usleep(200000); // 200ms
+        }
+    }
+    
+    if (agg == kAudioObjectUnknown) 
+    {
+        fprintf(stderr, "❌ 无法找到 Aggregate Device\n");
+        return kAudioHardwareBadDeviceError;
+    }
 
     AudioObjectPropertyAddress outAddr = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain

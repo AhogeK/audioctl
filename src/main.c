@@ -738,6 +738,30 @@ static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
         return 0;
     }
 
+    // 内部命令：删除 Aggregate Device（用于卸载脚本）
+    if (strcmp(argv[1], "internal-delete-aggregate") == 0)
+    {
+        if (aggregate_device_is_created())
+        {
+            OSStatus status = aggregate_device_destroy();
+            if (status == noErr)
+            {
+                printf("✅ Aggregate Device 已删除\n");
+                return 0;
+            }
+            else
+            {
+                fprintf(stderr, "❌ 删除 Aggregate Device 失败: %d\n", status);
+                return 1;
+            }
+        }
+        else
+        {
+            printf("ℹ️  Aggregate Device 不存在\n");
+            return 0;
+        }
+    }
+
     return 1;
 }
 
@@ -787,7 +811,8 @@ int main(const int argc, char* argv[])
     if (strncmp(cmd, "app-", 4) == 0) return handleAppVolumeCommands(argc, argv);
 
     if (strcmp(cmd, "virtual-status") == 0 || strcmp(cmd, "use-virtual") == 0 ||
-        strcmp(cmd, "use-physical") == 0 || strcmp(cmd, "agg-status") == 0)
+        strcmp(cmd, "use-physical") == 0 || strcmp(cmd, "agg-status") == 0 ||
+        strcmp(cmd, "internal-delete-aggregate") == 0)
     {
         return handleVirtualDeviceCommands(argc, argv);
     }
