@@ -180,28 +180,67 @@ static OSStatus VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef __unused in
     return 0;
 }
 
+// [时钟策略 - Clock Strategy]
+// 
+// 当前配置：物理设备作为 Master Clock (见 aggregate_device_manager.c 第 279 行)
+// CFDictionarySetValue(desc, CFSTR("master"), pUIDRef);
+//
+// 这意味着：
+//   - 虚拟设备作为从设备 (Slave)，跟随物理设备的时钟
+//   - 物理设备提供稳定的硬件时钟基准
+//   - 虚拟设备应用漂移补偿 (drift correction) 来同步
+//
+// 本函数生成虚拟时钟时间戳，仅用于：
+//   1. 驱动自身的缓冲区管理
+//   2. 当虚拟设备作为独立设备使用时的时钟源
+//
+// 性能优化：
+//   - 使用局部变量计算，减少内存访问
+//   - while 循环限制最大迭代次数（防止 CPU 峰值）
+//   - 标量读取无需锁保护
 static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef __unused inDriver,
                                                     AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID,
                                                     Float64* outSampleTime, UInt64* outHostTime,
                                                     UInt64* __unused outSeed)
 {
-    // 使用原子操作代替锁，避免潜在的死锁
+    // 获取当前时间
     UInt64 now = mach_absolute_time();
-    Float64 ticksPerBuf = gDevice_HostTicksPerFrame * (Float64)kDevice_RingBufferSize;
 
-    // 安全地更新计数器，最多处理 1000 次迭代（防止无限循环）
+    // 计算每个缓冲区的时间戳数
+    const Float64 ticksPerBuf = gDevice_HostTicksPerFrame * (Float64)kDevice_RingBufferSize;
+    const UInt64 anchorHostTime = gDevice_AnchorHostTime;
+
+    // 局部变量计算，减少内存访问
     UInt64 localNumberTimeStamps = gDevice_NumberTimeStamps;
-    int maxIterations = 1000;
-    while (maxIterations-- > 0 &&
-        (Float64)gDevice_AnchorHostTime + (Float64)(localNumberTimeStamps + 1) * ticksPerBuf <= (Float64)now)
+    const Float64 currentTargetTime = (Float64)anchorHostTime + (Float64)(localNumberTimeStamps + 1) * ticksPerBuf;
+
+    // 计算需要前进多少缓冲区
+    if (currentTargetTime <= (Float64)now)
     {
-        localNumberTimeStamps++;
+        // 计算可以前进的缓冲区数量，限制最大迭代次数
+        const Float64 diff = (Float64)now - (Float64)anchorHostTime;
+        const UInt64 targetBuffers = (UInt64)(diff / ticksPerBuf);
+
+        // 限制单次前进的最大缓冲区数（防止长时间阻塞）
+        const UInt64 maxAdvance = 1000;
+        if (targetBuffers > localNumberTimeStamps + maxAdvance)
+        {
+            localNumberTimeStamps = targetBuffers - maxAdvance;
+        }
+        else if (targetBuffers > localNumberTimeStamps)
+        {
+            localNumberTimeStamps = targetBuffers;
+        }
     }
+
+    // 写回全局变量
     gDevice_NumberTimeStamps = localNumberTimeStamps;
 
+    // 计算输出时间戳
     *outSampleTime = (Float64)localNumberTimeStamps * (Float64)kDevice_RingBufferSize;
-    *outHostTime = gDevice_AnchorHostTime + (UInt64)((Float64)localNumberTimeStamps * ticksPerBuf);
+    *outHostTime = anchorHostTime + (UInt64)((Float64)localNumberTimeStamps * ticksPerBuf);
     *outSeed = 1;
+
     return 0;
 }
 

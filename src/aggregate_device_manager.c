@@ -254,6 +254,8 @@ OSStatus aggregate_device_create(AudioDeviceID physicalDeviceID)
     CFRelease(s1);
 
     // Sub 2: Physical Out (Aggregate Out 3-4)
+    // [时钟策略] 物理设备不启用漂移补偿，因为它作为 Master Clock
+    // 虚拟设备启用漂移补偿来同步到物理设备的时钟
     CFMutableDictionaryRef s2 = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
                                                           &kCFTypeDictionaryValueCallBacks);
     CFDictionarySetValue(s2, CFSTR("uid"), pUIDRef);
@@ -271,12 +273,23 @@ OSStatus aggregate_device_create(AudioDeviceID physicalDeviceID)
     CFArrayAppendValue(sublist, s3);
     CFRelease(s3);
 
+    // [关键配置] Master Clock 选择策略
+    //
+    // 设置物理设备作为 Master Clock 的原因：
+    //   1. 物理设备有稳定的硬件时钟（晶振），抖动小
+    //   2. 虚拟设备是软件生成的时钟，精度较低
+    //   3. 如果虚拟设备作为 Master，其时钟抖动会影响整个 Aggregate 的稳定性
+    //   4. 虚拟设备启用 drift correction，自动同步到物理设备的时钟
+    //
+    // 配置详情：
+    //   - 物理设备: drift correction = OFF, 作为 Master Clock
+    //   - 虚拟设备: drift correction = ON, 跟随 Master Clock
     CFMutableDictionaryRef desc = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks,
                                                             &kCFTypeDictionaryValueCallBacks);
     CFDictionarySetValue(desc, CFSTR(kAudioAggregateDeviceUIDKey), uidRef);
     CFDictionarySetValue(desc, CFSTR(kAudioAggregateDeviceNameKey), nameRef);
     CFDictionarySetValue(desc, CFSTR(kAudioAggregateDeviceSubDeviceListKey), sublist);
-    CFDictionarySetValue(desc, CFSTR("master"), pUIDRef);
+    CFDictionarySetValue(desc, CFSTR("master"), pUIDRef); // 物理设备作为时钟主设备
 
     AudioDeviceID agg = kAudioObjectUnknown;
     OSStatus status = AudioHardwareCreateAggregateDevice(desc, &agg);
