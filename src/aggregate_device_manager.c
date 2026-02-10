@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
 #include <mach/mach_time.h>
@@ -64,8 +65,11 @@ static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 i
 
     if (shouldReconfigure)
     {
-        atomic_store(&g_lastListenerTime, now);
+        // atomic_store(&g_lastListenerTime, now); // Moved below to be unconditional
     }
+
+    // Update time regardless of outcome to throttle ALL checks
+    atomic_store(&g_lastListenerTime, now);
 
     atomic_store(&g_listenerReentrantGuard, false);
     return noErr;
@@ -346,28 +350,30 @@ OSStatus aggregate_device_activate(void)
         // 传入 kAudioObjectUnknown 让 aggregate_device_create 自动选择合适的物理设备
         OSStatus createStatus = aggregate_device_create(kAudioObjectUnknown);
         if (createStatus != noErr) return createStatus;
-        
+
         // 【修复】创建后等待系统刷新设备列表
         // 系统需要时间让新创建的 Aggregate Device 生效
-        usleep(500000); // 500ms
+        struct timespec ts500 = {0, 500000000};
+        nanosleep(&ts500, NULL);
     }
 
     // 【修复】查找 Aggregate Device，如果找不到则重试几次
     AudioDeviceID agg = kAudioObjectUnknown;
     int retryCount = 0;
     const int maxRetries = 5;
-    
+
     while (agg == kAudioObjectUnknown && retryCount < maxRetries)
     {
         agg = find_aggregate_device();
         if (agg == kAudioObjectUnknown)
         {
             retryCount++;
-            usleep(200000); // 200ms
+            struct timespec ts200 = {0, 200000000};
+            nanosleep(&ts200, NULL);
         }
     }
-    
-    if (agg == kAudioObjectUnknown) 
+
+    if (agg == kAudioObjectUnknown)
     {
         fprintf(stderr, "❌ 无法找到 Aggregate Device\n");
         return kAudioHardwareBadDeviceError;
@@ -398,19 +404,19 @@ OSStatus aggregate_device_deactivate(void)
 {
     // 优先使用 Aggregate Device 中绑定的物理设备
     AudioDeviceID physical = aggregate_device_get_physical_device();
-    
+
     // 如果 Aggregate Device 不存在或没有绑定物理设备，使用当前默认设备
     if (physical == kAudioObjectUnknown)
     {
         physical = aggregate_device_get_current_default_output();
     }
-    
+
     // 如果当前默认是聚合设备，需要找另一个物理设备
     if (physical == kAudioObjectUnknown || is_aggregate_device(physical))
     {
         physical = aggregate_device_get_recommended_physical_device();
     }
-    
+
     if (physical == kAudioObjectUnknown || is_virtual_device(physical))
     {
         return kAudioHardwareBadDeviceError;
@@ -419,15 +425,16 @@ OSStatus aggregate_device_deactivate(void)
     AudioObjectPropertyAddress outAddr = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
-    OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, sizeof(AudioDeviceID), &physical);
-    
+    OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &outAddr, 0, NULL, sizeof(AudioDeviceID),
+                                                 &physical);
+
     if (status == noErr)
     {
         char name[256] = {0};
         get_device_name(physical, name, sizeof(name));
         printf("✅ 已恢复到物理设备: %s\n", name);
     }
-    
+
     return status;
 }
 
@@ -534,7 +541,8 @@ AudioDeviceID aggregate_device_get_current_default_output(void)
     AudioObjectPropertyAddress propertyAddress = {
         kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
     };
-    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize, &defaultDevice);
+    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize,
+                                                 &defaultDevice);
     if (status != noErr) return kAudioObjectUnknown;
     return defaultDevice;
 }
@@ -547,10 +555,10 @@ AudioDeviceID aggregate_device_get_recommended_physical_device(void)
 
     // 首先尝试获取当前默认输出设备
     AudioDeviceID currentDefault = aggregate_device_get_current_default_output();
-    
+
     // 如果当前默认设备是有效的物理设备（不是虚拟设备或聚合设备），优先使用它
-    if (currentDefault != kAudioObjectUnknown && 
-        !is_virtual_device(currentDefault) && 
+    if (currentDefault != kAudioObjectUnknown &&
+        !is_virtual_device(currentDefault) &&
         !is_aggregate_device(currentDefault))
     {
         // 验证它有输出流
