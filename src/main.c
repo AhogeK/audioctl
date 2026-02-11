@@ -7,6 +7,7 @@
 #include "aggregate_device_manager.h"
 #include "aggregate_volume_proxy.h"
 #include "audio_router.h"
+#include "ipc/ipc_protocol.h"
 #include "ipc/ipc_server.h"
 #include <signal.h>
 #include <stdio.h>
@@ -49,6 +50,73 @@ static void kill_router(void)
 
     // 3. 清理锁文件（如果存在）
     unlink(lock_path);
+}
+
+// ============================================================================
+// IPC 服务管理
+// ============================================================================
+
+static void kill_ipc_service(void)
+{
+    // 发送 SIGTERM 给 IPC 服务进程
+    system("pkill -f 'audioctl internal-ipc-service' >/dev/null 2>&1");
+
+    // 清理 socket 文件
+    char socket_path[PATH_MAX];
+    if (get_ipc_socket_path(socket_path, sizeof(socket_path)) == 0)
+    {
+        unlink(socket_path);
+    }
+}
+
+void spawn_ipc_service(const char* self_path)
+{
+    kill_ipc_service(); // 确保旧的已停止
+
+    pid_t pid;
+
+    // 配置 spawn 属性
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+
+    // 设置进程组，脱离控制终端
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&attr, 0);
+
+    // 配置文件描述符：只重定向 stdout，保留 stderr 用于错误诊断
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+
+    int dev_null = open("/dev/null", O_WRONLY);
+    if (dev_null >= 0)
+    {
+        posix_spawn_file_actions_adddup2(&actions, dev_null, STDOUT_FILENO);
+        // stderr 不重定向，保留用于错误输出
+        posix_spawn_file_actions_addclose(&actions, dev_null);
+    }
+
+    // 构建参数数组
+    char* argv[] = {"audioctl", "internal-ipc-service", NULL};
+
+    // 启动进程
+    int ret = posix_spawn(&pid, self_path, &actions, &attr, argv, NULL);
+
+    // 清理资源
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attr);
+    if (dev_null >= 0) close(dev_null);
+
+    if (ret == 0)
+    {
+        printf("🚀 IPC 服务已启动 (PID: %d)\n", pid);
+        // 给服务一点时间初始化
+        struct timespec ts = {0, 100000000}; // 100ms
+        nanosleep(&ts, NULL);
+    }
+    else
+    {
+        fprintf(stderr, "⚠️  无法启动 IPC 服务: %s\n", strerror(ret));
+    }
 }
 
 // [优化] 使用 posix_spawn 替代 fork/exec
@@ -168,8 +236,8 @@ void printUsage()
 
     printf("========== 虚拟设备命令 ==========\n");
     printf(" virtual-status         - 显示虚拟设备状态\n");
-    printf(" use-virtual            - 切换到虚拟音频设备（自动创建聚合设备）\n");
-    printf(" use-physical           - 恢复到物理音频设备\n");
+    printf(" use-virtual            - 切换到虚拟音频设备，自动启动所有服务\n");
+    printf(" use-physical           - 恢复到物理设备，停止所有服务\n");
     printf(" agg-status             - 显示 Aggregate Device 状态\n\n");
 
     printf("========== 应用音量控制 ==========\n");
@@ -182,10 +250,7 @@ void printUsage()
 
     printf("========== 系统命令 ==========\n");
     printf(" --version, -v          - 显示版本信息\n");
-    printf(" --start-service        - 启动服务\n");
-    printf(" --stop-service         - 停止服务\n");
-    printf(" --restart-service      - 重启服务\n");
-    printf(" --service-status       - 查看服务状态\n\n");
+    printf(" --service-status       - 查看所有服务状态\n\n");
 
     printf("========== 使用示例 ==========\n");
     printf(" audioctl virtual-status          # 检查虚拟设备状态\n");
@@ -844,14 +909,19 @@ static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
 
         char self_path[4096];
         uint32_t size = sizeof(self_path);
-        if (_NSGetExecutablePath(self_path, &size) == 0) spawn_router(self_path);
-        else fprintf(stderr, "无法获取可执行文件路径，路由无法启动\n");
+        if (_NSGetExecutablePath(self_path, &size) == 0)
+        {
+            spawn_router(self_path);
+            spawn_ipc_service(self_path);
+        }
+        else fprintf(stderr, "无法获取可执行文件路径，服务无法启动\n");
         return 0;
     }
 
     if (strcmp(argv[1], "use-physical") == 0)
     {
         kill_router();
+        kill_ipc_service();
         return aggregate_device_deactivate() == noErr ? 0 : 1;
     }
 
@@ -890,17 +960,6 @@ static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
 
 static int handleServiceCommands(const char* cmd)
 {
-    if (strcmp(cmd, "--start-service") == 0)
-    {
-        ServiceStatus status = service_start();
-        return (status == SERVICE_STATUS_SUCCESS || status == SERVICE_STATUS_ALREADY_RUNNING) ? 0 : 1;
-    }
-    if (strcmp(cmd, "--stop-service") == 0)
-    {
-        ServiceStatus status = service_stop();
-        return (status == SERVICE_STATUS_SUCCESS || status == SERVICE_STATUS_NOT_RUNNING) ? 0 : 1;
-    }
-    if (strcmp(cmd, "--restart-service") == 0) return service_restart() == SERVICE_STATUS_SUCCESS ? 0 : 1;
     if (strcmp(cmd, "--service-status") == 0)
     {
         print_service_status();

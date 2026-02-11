@@ -119,35 +119,45 @@ kill_audioctl_processes() {
     rm -f /tmp/audioctl_router.pid
   fi
 
-  # [增强] 杀死任何名为 audioctl 的进程 (包括前台进程)
-  # 循环检查直到进程完全消失，防止死锁
-  local max_retries=10
+  # [修复] 只清理前台交互式进程，保留后台服务
+  # 避免杀死 internal-route 和 internal-ipc-service（这些服务正在运行）
+  local max_retries=5
   local retry=0
 
-  while true; do
-    local audioctl_pids
-    audioctl_pids="$(pgrep -x audioctl 2>/dev/null)" || true
+  while ((retry < max_retries)); do
+    # 只查找前台交互式 audioctl 进程（不是后台服务）
+    # 通过排除 internal-* 参数来识别服务进程
+    local foreground_pids
+    foreground_pids="$(pgrep -x audioctl 2>/dev/null | while read -r pid; do
+      # 检查进程命令行是否包含 internal- 参数
+      if ! ps -p "${pid}" -o args= 2>/dev/null | grep -q 'internal-'; then
+        echo "${pid}"
+      fi
+    done)" || true
 
-    if [[ -z "${audioctl_pids}" ]]; then
+    if [[ -z "${foreground_pids}" ]]; then
       break
     fi
 
     if ((retry == 0)); then
-      log_warn "发现残留 audioctl 进程，正在清理..."
-      echo "${audioctl_pids}" | xargs -I {} kill -TERM {} 2>/dev/null || true
-    elif ((retry >= 3)); then
-      log_warn "audioctl 进程响应缓慢，强制杀死..."
-      echo "${audioctl_pids}" | xargs -I {} kill -KILL {} 2>/dev/null || true
-    fi
-
-    if ((retry >= max_retries)); then
-      log_error "无法杀死 audioctl 进程，这可能会导致安装失败"
-      break
+      log_warn "发现残留前台 audioctl 进程，正在清理..."
+      echo "${foreground_pids}" | while read -r pid; do
+        kill -TERM "${pid}" 2>/dev/null || true
+      done
+    elif ((retry >= 2)); then
+      log_warn "前台进程响应缓慢，强制杀死..."
+      echo "${foreground_pids}" | while read -r pid; do
+        kill -KILL "${pid}" 2>/dev/null || true
+      done
     fi
 
     sleep 0.5
     retry=$((retry + 1))
   done
+
+  if ((retry >= max_retries)); then
+    log_warn "部分前台进程无法清理，但将继续安装"
+  fi
 
   # 清理新的锁文件
   rm -f "${lock_file}"
@@ -339,6 +349,20 @@ coreaudio_kickstart_once() {
     return 0
   fi
 
+  # [新增] 重启前系统健康检查
+  local load_avg
+  load_avg="$(uptime | awk -F'load averages:' '{print $2}' | awk '{print $1}' | tr -d ',')" || true
+  if [[ -n "${load_avg}" ]]; then
+    # 移除可能的小数点进行比较
+    local load_int
+    load_int="${load_avg%.*}"
+    if [[ "${load_int}" -gt 5 ]]; then
+      log_error "系统负载过高 (${load_avg})，禁止重启 CoreAudio"
+      log_error "请等待系统负载恢复正常后再试"
+      return 1
+    fi
+  fi
+
   # 在重启前先清理所有相关进程
   kill_audioctl_processes
 
@@ -454,6 +478,21 @@ install_driver_bundle() {
   # Single restart after copy
   coreaudio_kickstart_once
   if wait_coreaudiod 20; then
+    log_success "CoreAudio 已启动"
+
+    # [新增] 等待后检查系统负载
+    sleep 3
+    local post_load
+    post_load="$(uptime | awk -F'load averages:' '{print $2}' | awk '{print $1}' | tr -d ',')" || true
+    if [[ -n "${post_load}" ]]; then
+      local post_int="${post_load%.*}"
+      if [[ "${post_int}" -gt 10 ]]; then
+        log_error "⚠️  CoreAudio 启动后系统负载过高 (${post_load})"
+        log_error "这通常表示驱动初始化失败或进入死循环"
+        log_error "建议立即运行: sudo launchctl kickstart -k system/com.apple.audio.coreaudiod"
+        return 1
+      fi
+    fi
     log_success "CoreAudio 运行正常"
   else
     log_warn "CoreAudio 未在预期时间内启动"

@@ -5,6 +5,12 @@
 
 #include "service_manager.h"
 #include "constants.h"
+#include "ipc/ipc_protocol.h"
+
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <pwd.h>
 
 // 获取当前用户名
 static const char* get_current_username(void)
@@ -313,4 +319,36 @@ void print_service_status(void)
     }
 
     printf("当前用户：%s\n", get_current_username());
+
+    // 检查 IPC 服务状态
+    printf("\n========== IPC 服务状态 ==========\n");
+
+    char socket_path[PATH_MAX];
+    if (get_ipc_socket_path(socket_path, sizeof(socket_path)) == 0)
+    {
+        struct stat sock_stat;
+        if (stat(socket_path, &sock_stat) == 0 && S_ISSOCK(sock_stat.st_mode))
+        {
+            printf("● IPC 服务\n");
+            printf("状态：" ANSI_COLOR_BOLD_GREEN "运行中" ANSI_COLOR_RESET "\n");
+            printf("Socket：%s\n", socket_path);
+
+            // 检查 socket 文件修改时间
+            char time_str[100];
+            struct tm tm_info;
+            localtime_r(&sock_stat.st_mtime, &tm_info);
+            strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+            printf("启动时间：%s\n", time_str);
+        }
+        else
+        {
+            printf("● IPC 服务\n");
+            printf("状态：" ANSI_COLOR_BOLD_RED "未运行" ANSI_COLOR_RESET "\n");
+            printf("Socket：%s (不存在)\n", socket_path);
+        }
+    }
+    else
+    {
+        printf("● IPC 服务：无法获取 Socket 路径\n");
+    }
 }

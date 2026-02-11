@@ -6,10 +6,10 @@
 #include "virtual_device_manager.h"
 #include "aggregate_device_manager.h"
 #include "audio_control.h"
+#include "ipc/ipc_protocol.h"
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
-#include <unistd.h>
+#include <sys/stat.h>
 
 #pragma mark - 内部辅助函数
 
@@ -86,42 +86,58 @@ static OSStatus get_device_name(AudioDeviceID deviceId, char* name, size_t nameS
     return noErr;
 }
 
+// 检查设备是否匹配虚拟设备
+static bool is_virtual_device(AudioDeviceID deviceId)
+{
+    char uid[256] = {0};
+    char name[256] = {0};
+
+    get_device_uid(deviceId, uid, sizeof(uid));
+    get_device_name(deviceId, name, sizeof(name));
+
+    return (strstr(uid, VIRTUAL_DEVICE_UID) != NULL ||
+        strstr(name, "Virtual Audio") != NULL);
+}
+
+// 搜索所有设备以查找虚拟设备
+static AudioDeviceID search_for_virtual_device(void)
+{
+    AudioDeviceID* devices = NULL;
+    UInt32 count = 0;
+    AudioDeviceID found = kAudioObjectUnknown;
+
+    if (get_all_devices(&devices, &count) == noErr && devices != NULL)
+    {
+        for (UInt32 i = 0; i < count; i++)
+        {
+            if (is_virtual_device(devices[i]))
+            {
+                found = devices[i];
+                break;
+            }
+        }
+        free(devices);
+    }
+    return found;
+}
+
 // 查找虚拟设备
 static AudioDeviceID find_virtual_device(void)
 {
-    AudioDeviceID virtualDevice = kAudioObjectUnknown;
-
     // 最多尝试 5 次，每次间隔 500ms
     for (int attempt = 0; attempt < 5; attempt++)
     {
-        AudioDeviceID* devices = NULL;
-        UInt32 count = 0;
-
-        if (get_all_devices(&devices, &count) == noErr && devices != NULL)
+        AudioDeviceID virtualDevice = search_for_virtual_device();
+        if (virtualDevice != kAudioObjectUnknown)
         {
-            for (UInt32 i = 0; i < count; i++)
-            {
-                char uid[256] = {0};
-                char name[256] = {0};
-
-                get_device_uid(devices[i], uid, sizeof(uid));
-                get_device_name(devices[i], name, sizeof(name));
-
-                if (strstr(uid, VIRTUAL_DEVICE_UID) != NULL ||
-                    strstr(name, "Virtual Audio") != NULL)
-                {
-                    virtualDevice = devices[i];
-                    break;
-                }
-            }
-            free(devices);
+            return virtualDevice;
         }
 
-        if (virtualDevice != kAudioObjectUnknown) break;
-        usleep(500000);
+        struct timespec ts = {0, 500000000}; // 500ms
+        nanosleep(&ts, NULL);
     }
 
-    return virtualDevice;
+    return kAudioObjectUnknown;
 }
 
 // 获取默认输出设备ID
@@ -313,24 +329,23 @@ OSStatus virtual_device_deactivate(void)
         get_device_uid(devices[i], uid, sizeof(uid));
 
         // 跳过虚拟设备
-        if (strstr(uid, VIRTUAL_DEVICE_UID) == NULL && strstr(uid, "Virtual") == NULL)
+        if (strstr(uid, VIRTUAL_DEVICE_UID) != NULL || strstr(uid, "Virtual") != NULL)
         {
-            // 检查是否为输出设备
-            AudioObjectPropertyAddress propertyAddress = {
-                kAudioDevicePropertyStreamConfiguration,
-                kAudioDevicePropertyScopeOutput,
-                kAudioObjectPropertyElementMain
-            };
+            continue;
+        }
 
-            UInt32 dataSize = 0;
-            if (AudioObjectGetPropertyDataSize(devices[i], &propertyAddress, 0, NULL, &dataSize) == noErr)
-            {
-                if (dataSize > 0)
-                {
-                    firstPhysicalDevice = devices[i];
-                    break;
-                }
-            }
+        // 检查是否为输出设备
+        AudioObjectPropertyAddress propertyAddress = {
+            kAudioDevicePropertyStreamConfiguration,
+            kAudioDevicePropertyScopeOutput,
+            kAudioObjectPropertyElementMain
+        };
+
+        UInt32 dataSize = 0;
+        if (AudioObjectGetPropertyDataSize(devices[i], &propertyAddress, 0, NULL, &dataSize) == noErr && dataSize > 0)
+        {
+            firstPhysicalDevice = devices[i];
+            break;
         }
     }
 
@@ -407,6 +422,36 @@ void virtual_device_print_status(void)
     {
         printf("❌ 应用音量控制功能不可用\n");
         printf("   原因: %s\n", virtual_device_get_app_volume_status());
+    }
+
+    printf("\n========== IPC 服务状态 ==========\n");
+
+    // 检查 IPC 服务状态
+    char socket_path[PATH_MAX];
+    if (get_ipc_socket_path(socket_path, sizeof(socket_path)) == 0)
+    {
+        struct stat sock_stat;
+        if (stat(socket_path, &sock_stat) == 0 && S_ISSOCK(sock_stat.st_mode))
+        {
+            printf("✅ IPC 服务运行中\n");
+            printf("   Socket: %s\n", socket_path);
+
+            // 显示 socket 文件修改时间
+            char time_str[100];
+            struct tm tm_info;
+            localtime_r(&sock_stat.st_mtime, &tm_info);
+            strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+            printf("   启动时间: %s\n", time_str);
+        }
+        else
+        {
+            printf("❌ IPC 服务未运行\n");
+            printf("   使用 'audioctl use-virtual' 启动服务\n");
+        }
+    }
+    else
+    {
+        printf("⚠️  无法获取 IPC Socket 路径\n");
     }
 
     printf("\n====================================\n");

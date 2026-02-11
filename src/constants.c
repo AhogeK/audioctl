@@ -13,15 +13,16 @@
 #include <limits.h>
 
 /**
- * 获取用户主目录
+ * 获取实际用户主目录（处理 sudo/root 情况）
+ * 优先使用 getlogin() 获取登录用户，这适用于 sudo 和 su 场景
  */
 static const char* get_home_directory(void)
 {
-    const char* home = getenv("HOME");
-    if (!home)
+    // 方法 1: 尝试使用 getlogin() 获取登录用户名
+    // 这在 sudo/su 到 root 时仍然返回原用户名
+    char login_name[256];
+    if (getlogin_r(login_name, sizeof(login_name)) == 0 && strlen(login_name) > 0 && strcmp(login_name, "root") != 0)
     {
-        // 尝试通过 getpwuid 获取
-        uid_t uid = getuid();
         struct passwd pwd;
         struct passwd* result = NULL;
         long bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
@@ -29,7 +30,7 @@ static const char* get_home_directory(void)
         char* buffer = malloc(bufsize);
         if (buffer)
         {
-            if (getpwuid_r(uid, &pwd, buffer, bufsize, &result) == 0 && result)
+            if (getpwnam_r(login_name, &pwd, buffer, bufsize, &result) == 0 && result)
             {
                 static char home_path[PATH_MAX];
                 strncpy(home_path, pwd.pw_dir, sizeof(home_path) - 1);
@@ -40,7 +41,58 @@ static const char* get_home_directory(void)
             free(buffer);
         }
     }
-    return home;
+
+    // 方法 2: 检查 SUDO_USER 环境变量
+    const char* sudo_user = getenv("SUDO_USER");
+    if (sudo_user && strlen(sudo_user) > 0 && strcmp(sudo_user, "root") != 0)
+    {
+        struct passwd pwd;
+        struct passwd* result = NULL;
+        long bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
+        if (bufsize == -1) bufsize = 16384;
+        char* buffer = malloc(bufsize);
+        if (buffer)
+        {
+            if (getpwnam_r(sudo_user, &pwd, buffer, bufsize, &result) == 0 && result)
+            {
+                static char home_path[PATH_MAX];
+                strncpy(home_path, pwd.pw_dir, sizeof(home_path) - 1);
+                home_path[sizeof(home_path) - 1] = '\0';
+                free(buffer);
+                return home_path;
+            }
+            free(buffer);
+        }
+    }
+
+    // 方法 3: 尝试获取 HOME 环境变量
+    const char* home = getenv("HOME");
+    if (home && strlen(home) > 0)
+    {
+        return home;
+    }
+
+    // 方法 4: 通过 getpwuid 获取当前用户（可能是 root）
+    uid_t uid = getuid();
+    struct passwd pwd;
+    struct passwd* result = NULL;
+    long bufsize = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if (bufsize == -1) bufsize = 16384;
+    char* buffer = malloc(bufsize);
+    if (buffer)
+    {
+        if (getpwuid_r(uid, &pwd, buffer, bufsize, &result) == 0 && result)
+        {
+            static char home_path[PATH_MAX];
+            strncpy(home_path, pwd.pw_dir, sizeof(home_path) - 1);
+            home_path[sizeof(home_path) - 1] = '\0';
+            free(buffer);
+            return home_path;
+        }
+        free(buffer);
+    }
+
+    return NULL;
 }
 
 /**

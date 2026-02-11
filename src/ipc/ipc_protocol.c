@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-#include <errno.h>
 
 int get_ipc_socket_path(char* path, size_t path_size)
 {
