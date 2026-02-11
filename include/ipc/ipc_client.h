@@ -5,10 +5,10 @@
 #ifndef AUDIOCTL_IPC_CLIENT_H
 #define AUDIOCTL_IPC_CLIENT_H
 
-#include "ipc/ipc_protocol.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
+#include "ipc/ipc_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,15 +20,15 @@ extern "C" {
 
 typedef struct IPCClientContext
 {
-    int fd;                       // Socket 文件描述符
-    bool connected;               // 连接状态
-    uint64_t last_activity;       // 最后活动时间戳
-    int reconnect_attempts;       // 重连尝试次数
-    pid_t cached_pid;             // 缓存的 PID（用于驱动快速查询）
-    float cached_volume;          // 缓存的音量值
-    bool cached_muted;            // 缓存的静音状态
-    uint64_t cache_timestamp;     // 缓存时间戳
-    bool cache_valid;             // 缓存是否有效
+    int fd; // Socket 文件描述符
+    bool connected; // 连接状态
+    uint64_t last_activity; // 最后活动时间戳
+    int reconnect_attempts; // 重连尝试次数
+    pid_t cached_pid; // 缓存的 PID（用于驱动快速查询）
+    float cached_volume; // 缓存的音量值
+    bool cached_muted; // 缓存的静音状态
+    uint64_t cache_timestamp; // 缓存时间戳
+    bool cache_valid; // 缓存是否有效
 } IPCClientContext;
 
 // ============================================================================
@@ -105,8 +105,7 @@ int ipc_client_recv(IPCClientContext* ctx, IPCMessageHeader* header, void* paylo
  * @param response_size 响应缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_send_sync(IPCClientContext* ctx,
-                         const IPCMessageHeader* request_header, const void* request_payload,
+int ipc_client_send_sync(IPCClientContext* ctx, const IPCMessageHeader* request_header, const void* request_payload,
                          IPCMessageHeader* response_header, void* response_payload, size_t response_size);
 
 // ============================================================================
@@ -159,8 +158,7 @@ void ipc_client_set_cache(IPCClientContext* ctx, pid_t pid, float volume, bool m
  * @param muted 初始静音状态
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_name,
-                            float initial_volume, bool muted);
+int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_name, float initial_volume, bool muted);
 
 /**
  * 注销应用
@@ -242,4 +240,4 @@ void ipc_client_reset_reconnect(IPCClientContext* ctx);
 }
 #endif
 
-#endif //AUDIOCTL_IPC_CLIENT_H
+#endif // AUDIOCTL_IPC_CLIENT_H
