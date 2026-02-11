@@ -21,9 +21,6 @@ static Float64 gDevice_HostTicksPerFrame = 0.0;
 static UInt64 gDevice_NumberTimeStamps = 0;
 static UInt64 gDevice_AnchorHostTime = 0;
 
-#define RING_BUFFER_FRAMES 16384
-static Float32 gRingBuffer[RING_BUFFER_FRAMES * 2];
-
 // Forward Declarations
 static HRESULT VirtualAudioDriver_QueryInterface(void* inDriver, REFIID inUUID, LPVOID* outInterface);
 static ULONG VirtualAudioDriver_AddRef(void* inDriver);
@@ -164,7 +161,6 @@ static OSStatus VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef __unused i
     {
         gDevice_NumberTimeStamps = 0;
         gDevice_AnchorHostTime = mach_absolute_time();
-        memset(gRingBuffer, 0, sizeof(gRingBuffer));
     }
     gDevice_IOIsRunning++;
     pthread_mutex_unlock(&gPlugIn_StateMutex);
@@ -274,7 +270,7 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
         inOperationID == kAudioServerPlugInIOOperationProcessMix)
     {
         Float32* buf = (Float32*)ioMainBuffer;
-        UInt32 frames = (inIOBufferFrameSize > RING_BUFFER_FRAMES) ? RING_BUFFER_FRAMES : inIOBufferFrameSize;
+        UInt32 frames = inIOBufferFrameSize;
 
         // [实时音频路径 - 热路径 Hot Path]
         // 每 2-10ms 调用一次，严禁以下操作：
@@ -287,19 +283,6 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
         //   - 无锁设计，直接读取原子变量 g_defaultVolume
         //   - 简单标量乘法，耗时极短
         app_volume_driver_apply_volume(inClientID, buf, frames, 2);
-
-        // [调试] 音频监控环形缓冲区 - 仅 DEBUG 模式启用
-        // 注意：此操作消耗内存带宽，生产环境应禁用
-#ifdef DEBUG
-        static UInt32 writePos = 0;
-        for (UInt32 f = 0; f < frames; f++)
-        {
-            UInt32 p = ((writePos + f) % RING_BUFFER_FRAMES) * 2;
-            gRingBuffer[p] = buf[f * 2];
-            gRingBuffer[p + 1] = buf[f * 2 + 1];
-        }
-        writePos = (writePos + frames) % RING_BUFFER_FRAMES;
-#endif
     }
 
     return 0;
