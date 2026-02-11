@@ -48,10 +48,14 @@ set(DRIVER_OUTPUT_NAME "VirtualAudioDriver")
 set(IPC_SOURCES
         "${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c"
         "${CMAKE_SOURCE_DIR}/src/ipc/ipc_server.c"
+        "${CMAKE_SOURCE_DIR}/src/ipc/ipc_client.c"
+        "${CMAKE_SOURCE_DIR}/src/constants.c"
 )
 
 set(IPC_HEADERS
         "${CMAKE_SOURCE_DIR}/include/ipc/ipc_protocol.h"
+        "${CMAKE_SOURCE_DIR}/include/ipc/ipc_server.h"
+        "${CMAKE_SOURCE_DIR}/include/ipc/ipc_client.h"
 )
 
 add_library(audioctl_ipc STATIC ${IPC_SOURCES} ${IPC_HEADERS})

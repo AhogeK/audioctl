@@ -15,6 +15,7 @@ extern int run_app_volume_control_tests(void);
 extern int run_virtual_device_manager_tests(void);
 extern int run_aggregate_device_manager_tests(void);
 extern int run_ipc_protocol_tests(void);
+extern int run_ipc_client_tests(void);
 
 int main()
 {
@@ -35,6 +36,7 @@ int main()
     failed += run_virtual_device_manager_tests();
     failed += run_aggregate_device_manager_tests();
     failed += run_ipc_protocol_tests();
+    failed += run_ipc_client_tests();
 
     printf("\n========================================\n");
     printf("Test summary: ");

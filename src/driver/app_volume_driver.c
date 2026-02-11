@@ -2,9 +2,10 @@
 // Driver-side per-app volume control
 // Created by AhogeK on 02/05/26.
 //
-// Uses local volume table (IPC will be implemented via Unix Domain Socket)
+// Uses IPC client with local cache for real-time audio processing
 
 #include "driver/app_volume_driver.h"
+#include "ipc/ipc_client.h"
 #include <os/lock.h>
 #include <stdatomic.h>
 
@@ -24,7 +25,11 @@ static atomic_int g_clientCount = 0;
 
 static bool g_initialized = false;
 
-// 全局音量表
+// IPC 客户端上下文（用于从服务端获取音量）
+static IPCClientContext g_ipcClient = {0};
+static bool g_ipcInitialized = false;
+
+// 本地音量表（作为 IPC 的缓存）
 static AppVolumeTable g_volumeTable = {0};
 static os_unfair_lock g_tableLock = OS_UNFAIR_LOCK_INIT;
 
@@ -46,6 +51,15 @@ void app_volume_driver_init(void)
     memset(&g_volumeTable, 0, sizeof(g_volumeTable));
     os_unfair_lock_unlock(&g_tableLock);
 
+    // 初始化 IPC 客户端
+    if (!g_ipcInitialized)
+    {
+        ipc_client_init(&g_ipcClient);
+        // 尝试连接 IPC 服务
+        ipc_client_connect(&g_ipcClient);
+        g_ipcInitialized = true;
+    }
+
     g_initialized = true;
 }
 
@@ -61,6 +75,14 @@ void app_volume_driver_cleanup(void)
     atomic_store(&g_clientCount, 0);
     os_unfair_lock_unlock(&g_clientLock);
 
+    // 清理 IPC 客户端
+    if (g_ipcInitialized)
+    {
+        ipc_client_disconnect(&g_ipcClient);
+        ipc_client_cleanup(&g_ipcClient);
+        g_ipcInitialized = false;
+    }
+
     g_initialized = false;
 }
 
@@ -68,9 +90,6 @@ void app_volume_driver_cleanup(void)
 
 OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bundleId, const char* name)
 {
-    (void)bundleId;
-    (void)name;
-
     os_unfair_lock_lock(&g_clientLock);
 
     // 检查是否已存在
@@ -87,15 +106,29 @@ OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bu
     // 查找空槽
     for (UInt32 i = 0; i < MAX_CLIENTS; i++)
     {
-        if (!g_clients[i].active)
+        if (g_clients[i].active)
         {
-            g_clients[i].clientID = clientID;
-            g_clients[i].pid = pid;
-            g_clients[i].active = true;
-            atomic_fetch_add(&g_clientCount, 1);
-            os_unfair_lock_unlock(&g_clientLock);
-            return noErr;
+            continue;
         }
+
+        g_clients[i].clientID = clientID;
+        g_clients[i].pid = pid;
+        g_clients[i].active = true;
+        atomic_fetch_add(&g_clientCount, 1);
+        os_unfair_lock_unlock(&g_clientLock);
+
+        // 通过 IPC 注册到服务端
+        if (g_ipcInitialized && ipc_client_is_connected(&g_ipcClient))
+        {
+            const char* appName = name;
+            if (appName == NULL)
+            {
+                appName = bundleId ? bundleId : "Unknown";
+            }
+            ipc_client_register_app(&g_ipcClient, pid, appName, 1.0f, false);
+        }
+
+        return noErr;
     }
 
     os_unfair_lock_unlock(&g_clientLock);
@@ -104,17 +137,27 @@ OSStatus app_volume_driver_add_client(UInt32 clientID, pid_t pid, const char* bu
 
 OSStatus app_volume_driver_remove_client(UInt32 clientID)
 {
+    pid_t removedPid = 0;
+
     os_unfair_lock_lock(&g_clientLock);
 
     for (UInt32 i = 0; i < MAX_CLIENTS; i++)
     {
         if (g_clients[i].active && g_clients[i].clientID == clientID)
         {
+            removedPid = g_clients[i].pid;
             g_clients[i].active = false;
             g_clients[i].clientID = 0;
             g_clients[i].pid = 0;
             atomic_fetch_sub(&g_clientCount, 1);
             os_unfair_lock_unlock(&g_clientLock);
+
+            // 通过 IPC 从服务端注销
+            if (g_ipcInitialized && removedPid > 0 && ipc_client_is_connected(&g_ipcClient))
+            {
+                ipc_client_unregister_app(&g_ipcClient, removedPid);
+            }
+
             return noErr;
         }
     }
@@ -204,19 +247,11 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
     // 1. 获取 PID (TryLock)
     pid_t pid = app_volume_driver_get_pid(clientID);
 
-    // 2. 如果找到了 PID，查表 (TryLock)
-    if (pid > 0 && os_unfair_lock_trylock(&g_tableLock))
+    // 2. 如果找到了 PID，使用 IPC 客户端快速查询（带缓存）
+    if (pid > 0 && g_ipcInitialized)
     {
-        for (UInt32 i = 0; i < g_volumeTable.count; i++)
-        {
-            if (g_volumeTable.entries[i].pid == pid)
-            {
-                volume = g_volumeTable.entries[i].volume;
-                isMuted = (g_volumeTable.entries[i].isMuted != 0);
-                break;
-            }
-        }
-        os_unfair_lock_unlock(&g_tableLock);
+        // 使用快速查询，非阻塞，优先使用缓存
+        ipc_client_get_volume_fast(&g_ipcClient, pid, &volume, &isMuted);
     }
 
     if (outIsMuted) *outIsMuted = isMuted;

@@ -1,5 +1,6 @@
 #include "app_volume_control.h"
 #include "virtual_device_manager.h"
+#include "ipc/ipc_client.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -8,6 +9,36 @@
 // 全局音量列表
 static AppVolumeList g_volumeList = {0};
 static bool g_initialized = false;
+
+// IPC 客户端上下文
+static IPCClientContext g_ipcClient = {0};
+static bool g_ipcInitialized = false;
+
+#pragma mark - IPC 客户端管理
+
+static OSStatus ensure_ipc_client_connected(void)
+{
+    if (!g_ipcInitialized)
+    {
+        if (ipc_client_init(&g_ipcClient) != 0)
+        {
+            return -1;
+        }
+        g_ipcInitialized = true;
+    }
+
+    if (!ipc_client_is_connected(&g_ipcClient) && ipc_client_connect(&g_ipcClient) != 0)
+    {
+        // 连接失败，尝试重连
+        if (ipc_client_should_reconnect(&g_ipcClient))
+        {
+            ipc_client_reconnect(&g_ipcClient);
+        }
+        return -1;
+    }
+
+    return noErr;
+}
 
 #pragma mark - 初始化和清理
 
@@ -78,11 +109,12 @@ static AppVolumeInfo* find_or_create_entry(pid_t pid)
     return entry;
 }
 
-#pragma mark - 驱动通信
+#pragma mark - 驱动通信 (通过 IPC)
 
 OSStatus app_volume_sync_to_driver(void)
 {
-    // TODO: 实现 Unix Domain Socket IPC 同步
+    // 现在通过 IPC 客户端自动同步，此函数保留用于兼容性
+    // 实际的同步在 set/mute/register 操作中直接完成
     return noErr;
 }
 
@@ -106,8 +138,11 @@ OSStatus app_volume_set(pid_t pid, Float32 volume)
 
     pthread_mutex_unlock(&g_volumeList.mutex);
 
-    // TODO: 同步到驱动 (通过 Unix Domain Socket IPC)
-    // app_volume_sync_to_driver();
+    // 同步到 IPC 服务端
+    if (ensure_ipc_client_connected() == noErr)
+    {
+        ipc_client_set_app_volume(&g_ipcClient, pid, volume);
+    }
 
     return noErr;
 }
@@ -150,8 +185,11 @@ OSStatus app_volume_set_mute(pid_t pid, bool mute)
 
     pthread_mutex_unlock(&g_volumeList.mutex);
 
-    // TODO: 同步到驱动 (通过 Unix Domain Socket IPC)
-    // app_volume_sync_to_driver();
+    // 同步到 IPC 服务端
+    if (ensure_ipc_client_connected() == noErr)
+    {
+        ipc_client_set_app_mute(&g_ipcClient, pid, mute);
+    }
 
     return noErr;
 }
@@ -208,8 +246,18 @@ OSStatus app_volume_register(pid_t pid, const char* bundleId, const char* name)
 
     pthread_mutex_unlock(&g_volumeList.mutex);
 
-    // TODO: 同步到驱动 (通过 Unix Domain Socket IPC)
-    // app_volume_sync_to_driver();
+    // 同步到 IPC 服务端
+    if (ensure_ipc_client_connected() == noErr)
+    {
+        // 使用应用名称或 bundleId 作为名称
+        const char* appName;
+        if (bundleId)
+            appName = name ? name : bundleId;
+        else
+            appName = name ? name : "Unknown";
+        ipc_client_register_app(&g_ipcClient, pid, appName,
+                                entry->volume, entry->isMuted);
+    }
 
     return noErr;
 }
@@ -232,8 +280,11 @@ OSStatus app_volume_unregister(pid_t pid)
 
             pthread_mutex_unlock(&g_volumeList.mutex);
 
-            // 同步到驱动
-            app_volume_sync_to_driver();
+            // 同步到 IPC 服务端
+            if (ensure_ipc_client_connected() == noErr)
+            {
+                ipc_client_unregister_app(&g_ipcClient, pid);
+            }
 
             return noErr;
         }
@@ -258,8 +309,8 @@ OSStatus app_volume_set_active(pid_t pid, bool active)
 
     pthread_mutex_unlock(&g_volumeList.mutex);
 
-    // TODO: 同步到驱动 (通过 Unix Domain Socket IPC)
-    // app_volume_sync_to_driver();
+    // 状态变更通过 IPC 同步（如果需要）
+    // 当前实现中 isActive 是本地状态，不需要同步到服务端
 
     return noErr;
 }
@@ -343,7 +394,7 @@ void app_volume_cli_list(void)
         return;
     }
 
-    // 2. 从驱动获取客户端列表 (TODO: 迁移到 Unix Domain Socket IPC)
+    // 2. 从驱动获取客户端列表
     // 目前 HAL 属性通信受限，显示提示
     printf("当前正在重构应用音量控制架构...\n");
     printf("提示: 正在迁移到 Unix Domain Socket IPC 以支持现代 macOS 安全限制\n");
