@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <sys/file.h>
 #include <mach-o/dyld.h>
+#include <spawn.h>
 
 static void kill_router(void)
 {
@@ -48,25 +49,59 @@ static void kill_router(void)
     unlink(lock_path);
 }
 
+// [优化] 使用 posix_spawn 替代 fork/exec
+// 优势：
+//   1. macOS 上推荐的进程启动方式，性能更好
+//   2. 避免了 fork 的安全限制（fork-safe 操作）
+//   3. 更好的错误处理（可通过 spawn 返回值获取错误码）
 void spawn_router(const char* self_path)
 {
     kill_router(); // 确保旧的已停止
 
-    pid_t pid = fork();
-    if (pid == 0)
-    {
-        // Child
-        setsid(); // Detach
-        // Redirect output to /dev/null to avoid cluttering terminal
-        freopen("/dev/null", "w", stdout);
-        freopen("/dev/null", "w", stderr);
+    pid_t pid;
 
-        execl(self_path, "audioctl", "internal-route", NULL);
-        exit(1);
-    }
-    else if (pid > 0)
+    // 配置 spawn 属性
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+
+    // 设置进程组，脱离控制终端（类似 setsid）
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+    posix_spawnattr_setpgroup(&attr, 0);
+
+    // 打开 /dev/null 用于重定向 stdout/stderr
+    int dev_null = open("/dev/null", O_WRONLY);
+    if (dev_null < 0)
     {
-        // Parent
+        fprintf(stderr, "无法打开 /dev/null\n");
+        posix_spawnattr_destroy(&attr);
+        return;
+    }
+
+    // 配置文件描述符
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+
+    // 重定向 stdout 到 /dev/null
+    posix_spawn_file_actions_adddup2(&actions, dev_null, STDOUT_FILENO);
+    // 重定向 stderr 到 /dev/null
+    posix_spawn_file_actions_adddup2(&actions, dev_null, STDERR_FILENO);
+    // 关闭原始的文件描述符
+    posix_spawn_file_actions_addclose(&actions, dev_null);
+
+    // 构建参数数组
+    char* argv[] = {"audioctl", "internal-route", NULL};
+
+    // 启动进程
+    int ret = posix_spawn(&pid, self_path, &actions, &attr, argv, NULL);
+
+    // 清理资源
+    posix_spawn_file_actions_destroy(&actions);
+    posix_spawnattr_destroy(&attr);
+    close(dev_null);
+
+    if (ret == 0)
+    {
+        // 成功
         char pid_path[PATH_MAX];
         if (get_pid_file_path(pid_path, sizeof(pid_path)) == 0)
         {
@@ -78,6 +113,11 @@ void spawn_router(const char* self_path)
             }
         }
         printf("后台音频路由已启动 (PID: %d)\n", pid);
+    }
+    else
+    {
+        // 失败
+        fprintf(stderr, "启动路由进程失败: %s\n", strerror(ret));
     }
 }
 

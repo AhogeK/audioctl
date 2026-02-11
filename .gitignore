@@ -55,6 +55,8 @@
 # *.iml
 # *.ipr
 
+build/
+
 # CMake
 cmake-build-*/
 
