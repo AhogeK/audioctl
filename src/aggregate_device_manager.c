@@ -4,6 +4,7 @@
 //
 
 #include "aggregate_device_manager.h"
+#include "aggregate_volume_proxy.h"
 #include "virtual_device_manager.h"
 #include "audio_control.h"
 #include <stdio.h>
@@ -198,8 +199,15 @@ static AudioDeviceID find_aggregate_device(void)
         if (!is_aggregate_device(devices[i])) continue;
 
         char name[256] = {0};
-        if (get_device_name(devices[i], name, sizeof(name)) == noErr &&
-            strstr(name, "audioctl Aggregate"))
+        char uid[256] = {0};
+
+        // 优先通过 UID 匹配，回退到通过名称匹配
+        if ((get_device_uid(devices[i], uid, sizeof(uid)) == noErr &&
+                strstr(uid, AGGREGATE_DEVICE_UID_PREFIX)) ||
+            (get_device_name(devices[i], name, sizeof(name)) == noErr &&
+                (strcasecmp(name, AGGREGATE_DEVICE_NAME) == 0 ||
+                    strstr(name, "audioctl Aggregate") ||
+                    strstr(name, "AudioCTL Aggregate"))))
         {
             agg = devices[i];
             break;
@@ -410,6 +418,13 @@ OSStatus aggregate_device_activate(void)
     }
     printf("   音频流: 应用 → 虚拟设备(音量控制) → %s\n", physName);
 
+    // 启动音量代理，使 Aggregate Device 可以控制音量
+    OSStatus proxyStatus = aggregate_volume_proxy_start();
+    if (proxyStatus != noErr)
+    {
+        printf("⚠️  警告: 无法启动音量代理，Aggregate Device 音量控制可能不可用\n");
+    }
+
     return status;
 }
 
@@ -447,6 +462,9 @@ OSStatus aggregate_device_deactivate(void)
         get_device_name(physical, name, sizeof(name));
         printf("✅ 已恢复到物理设备: %s\n", name);
     }
+
+    // 停止音量代理
+    aggregate_volume_proxy_stop();
 
     return status;
 }

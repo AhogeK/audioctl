@@ -18,6 +18,7 @@ target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/app_volume_control.c
         ${CMAKE_SOURCE_DIR}/src/virtual_device_manager.c
         ${CMAKE_SOURCE_DIR}/src/aggregate_device_manager.c
+        ${CMAKE_SOURCE_DIR}/src/aggregate_volume_proxy.c
 )
 
 # 添加包含目录

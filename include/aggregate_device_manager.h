@@ -24,7 +24,7 @@ typedef struct
 
 // Aggregate Device 的 UID 前缀
 #define AGGREGATE_DEVICE_UID_PREFIX "audioctl-aggregate"
-#define AGGREGATE_DEVICE_NAME "audioctl Aggregate"
+#define AGGREGATE_DEVICE_NAME "AudioCTL Aggregate"
 
 #pragma mark - 生命周期管理
 

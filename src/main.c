@@ -5,6 +5,7 @@
 #include "app_volume_control.h"
 #include "virtual_device_manager.h"
 #include "aggregate_device_manager.h"
+#include "aggregate_volume_proxy.h"
 #include "audio_router.h"
 #include <signal.h>
 #include <stdio.h>
@@ -343,10 +344,8 @@ bool parseOptions(const int argc, char* argv[], ProgramOptions* opts)
     return validateOptionCombination(opts);
 }
 
-void printDeviceInfo(const AudioDeviceInfo* info)
+static void printDeviceTypeAndChannels(const AudioDeviceInfo* info)
 {
-    printf("ID: %d, 名称: %s, ", info->deviceId, info->name);
-
     switch (info->deviceType)
     {
     case kDeviceTypeInput:
@@ -363,8 +362,37 @@ void printDeviceInfo(const AudioDeviceInfo* info)
         printf("未知类型");
         break;
     }
+}
 
-    printf("\n  传输类型: %s", getTransportTypeName(info->transportType));
+static void printAggregateVolume(void)
+{
+    AudioDeviceID physicalDevice = aggregate_device_get_physical_device();
+    if (physicalDevice == kAudioObjectUnknown)
+    {
+        printf("可调节 (未绑定物理设备)");
+        return;
+    }
+
+    AudioDeviceInfo physInfo;
+    if (getDeviceInfo(physicalDevice, &physInfo) != noErr)
+    {
+        printf("可调节 (状态未知)");
+        return;
+    }
+
+    if (physInfo.hasVolumeControl)
+    {
+        printf("%.1f%% (由 %s 代理)", physInfo.volume * 100.0, physInfo.name);
+    }
+    else
+    {
+        printf("不可调节 (物理设备 %s 不支持)", physInfo.name);
+    }
+}
+
+static void printVolumeInfo(const AudioDeviceInfo* info)
+{
+    bool isAggregate = (strstr(info->name, "AudioCTL Aggregate") != NULL);
 
     if (info->deviceType == kDeviceTypeInput)
     {
@@ -382,7 +410,12 @@ void printDeviceInfo(const AudioDeviceInfo* info)
     else if (info->deviceType == kDeviceTypeOutput || info->deviceType == kDeviceTypeInputOutput)
     {
         printf("\n  音量: ");
-        if (!info->hasVolumeControl)
+
+        if (isAggregate)
+        {
+            printAggregateVolume();
+        }
+        else if (!info->hasVolumeControl)
         {
             printf("不可调节");
         }
@@ -390,9 +423,21 @@ void printDeviceInfo(const AudioDeviceInfo* info)
         {
             printf("%.1f%%", info->volume * 100.0);
         }
+
         // 只为输出设备显示静音状态
         printf(", 静音: %s", info->isMuted ? "是" : "否");
     }
+}
+
+void printDeviceInfo(const AudioDeviceInfo* info)
+{
+    printf("ID: %d, 名称: %s, ", info->deviceId, info->name);
+
+    printDeviceTypeAndChannels(info);
+
+    printf("\n  传输类型: %s", getTransportTypeName(info->transportType));
+
+    printVolumeInfo(info);
 
     printf("\n  采样率: %d Hz", info->sampleRate);
     if (info->bitsPerChannel > 0)
@@ -626,6 +671,26 @@ static int handleVolumeSet(int argc, char* argv[])
     {
         printf("错误：音量值必须是 0 到 100 之间的数字\n");
         return 1;
+    }
+
+    // 检查当前默认输出设备是否是 Aggregate Device
+    if (!isInput)
+    {
+        AggregateDeviceInfo aggInfo;
+        if (aggregate_device_get_info(&aggInfo) && aggInfo.isCreated &&
+            aggregate_device_get_current_default_output() == aggInfo.deviceId)
+        {
+            // 当前默认是 Aggregate Device，使用音量代理设置
+            OSStatus status = aggregate_volume_set(volume / 100.0f);
+            if (status == noErr)
+            {
+                printf("✅ 已将 AudioCTL Aggregate 音量设置为 %.1f%% (同步到物理设备)\n", volume);
+                return 0;
+            }
+
+            printf("错误：设置 AudioCTL Aggregate 音量失败: %d\n", status);
+            return 1;
+        }
     }
 
     AudioDeviceID targetDeviceId;

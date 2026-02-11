@@ -498,7 +498,7 @@ cmd_uninstall() {
       # 先恢复到物理设备（如果 Aggregate 是默认）
       local current_default
       current_default="$(system_profiler SPAudioDataType 2>/dev/null | grep -A 5 "Default Output" | grep "Device:" | head -1)" || true
-      if [[ "${current_default}" == *"audioctl Aggregate"* ]]; then
+      if [[ "${current_default}" == *"AudioCTL Aggregate"* ]]; then
         log_warn "Aggregate Device 是当前默认设备，先恢复物理设备..."
         "${audioctl_bin}" use-physical 2>/dev/null || true
         sleep 1
@@ -511,7 +511,7 @@ cmd_uninstall() {
         # 备用方法：直接使用 CoreAudio API 删除
         # 查找所有 Aggregate Device 并删除
         local agg_devices
-        agg_devices="$(system_profiler SPAudioDataType 2>/dev/null | grep -B 5 "audioctl Aggregate" | grep "Device ID:" | awk '{print $3}')" || true
+        agg_devices="$(system_profiler SPAudioDataType 2>/dev/null | grep -B 5 "AudioCTL Aggregate" | grep "Device ID:" | awk '{print $3}')" || true
         if [[ -n "${agg_devices}" ]]; then
           echo "${agg_devices}" | while read -r device_id; do
             if [[ -n "${device_id}" ]]; then
@@ -534,7 +534,7 @@ EOF
       sleep 1
       log_success "Aggregate Device 已删除"
     else
-      log_info "没有找到 audioctl Aggregate Device"
+      log_info "没有找到 AudioCTL Aggregate Device"
     fi
   else
     log_warn "未找到 audioctl 工具，跳过 Aggregate Device 删除"
