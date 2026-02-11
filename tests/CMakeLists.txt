@@ -21,6 +21,7 @@ target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/aggregate_device_manager.c
         ${CMAKE_SOURCE_DIR}/src/aggregate_volume_proxy.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c
+        ${CMAKE_SOURCE_DIR}/src/ipc/ipc_server.c
         ${CMAKE_SOURCE_DIR}/src/constants.c
 )
 

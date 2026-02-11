@@ -7,6 +7,7 @@
 #include "aggregate_device_manager.h"
 #include "aggregate_volume_proxy.h"
 #include "audio_router.h"
+#include "ipc/ipc_server.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -976,6 +977,23 @@ int main(const int argc, char* argv[])
 
         // 退出前清理锁文件
         unlink(lock_path);
+        return 0;
+    }
+
+    if (strcmp(cmd, "internal-ipc-service") == 0)
+    {
+        IPCServerContext ctx;
+
+        if (ipc_server_init(&ctx) != 0)
+        {
+            fprintf(stderr, "❌ 无法初始化 IPC 服务端\n");
+            return 1;
+        }
+
+        printf("🚀 IPC 服务已启动 (PID: %d)\n", getpid());
+        ipc_server_run(&ctx);
+        ipc_server_cleanup(&ctx);
+
         return 0;
     }
 

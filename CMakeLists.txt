@@ -47,6 +47,7 @@ set(DRIVER_OUTPUT_NAME "VirtualAudioDriver")
 # 用于驱动插件和主程序之间的通信
 set(IPC_SOURCES
         "${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c"
+        "${CMAKE_SOURCE_DIR}/src/ipc/ipc_server.c"
 )
 
 set(IPC_HEADERS
