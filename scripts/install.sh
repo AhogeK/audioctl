@@ -70,13 +70,30 @@ hash_dir() {
     shasum -a 256 | awk '{print $1}'
 }
 
+# 获取 audioctl PID 文件路径（与代码中 constants.c 保持一致）
+get_audioctl_pid_file() {
+  local home="${HOME}"
+  echo "${home}/Library/Application Support/audioctl/audioctl.pid"
+}
+
+# 获取 audioctl 锁文件路径
+get_audioctl_lock_file() {
+  local home="${HOME}"
+  echo "${home}/Library/Application Support/audioctl/audioctl.lock"
+}
+
 kill_audioctl_processes() {
   log_info "清理 audioctl 相关进程..."
 
-  # 杀死路由进程 (使用 PID 文件)
-  if [[ -f "/tmp/audioctl_router.pid" ]]; then
+  local pid_file
+  pid_file="$(get_audioctl_pid_file)"
+  local lock_file
+  lock_file="$(get_audioctl_lock_file)"
+
+  # [修复] 杀死路由进程 (使用新的 PID 文件路径)
+  if [[ -f "${pid_file}" ]]; then
     local router_pid
-    router_pid="$(cat /tmp/audioctl_router.pid 2>/dev/null)" || true
+    router_pid="$(cat "${pid_file}" 2>/dev/null)" || true
     if [[ -n "${router_pid}" ]] && kill -0 "${router_pid}" 2>/dev/null; then
       log_info "停止路由进程 (PID: ${router_pid})..."
       kill -TERM "${router_pid}" 2>/dev/null || true
@@ -85,6 +102,19 @@ kill_audioctl_processes() {
       if kill -0 "${router_pid}" 2>/dev/null; then
         kill -KILL "${router_pid}" 2>/dev/null || true
       fi
+    fi
+    rm -f "${pid_file}"
+  fi
+
+  # [兼容] 清理旧的 PID 文件路径（如果存在）
+  if [[ -f "/tmp/audioctl_router.pid" ]]; then
+    local old_pid
+    old_pid="$(cat /tmp/audioctl_router.pid 2>/dev/null)" || true
+    if [[ -n "${old_pid}" ]] && kill -0 "${old_pid}" 2>/dev/null; then
+      log_warn "发现旧路径的残留进程，正在清理..."
+      kill -TERM "${old_pid}" 2>/dev/null || true
+      sleep 1
+      kill -KILL "${old_pid}" 2>/dev/null || true
     fi
     rm -f /tmp/audioctl_router.pid
   fi
@@ -103,7 +133,9 @@ kill_audioctl_processes() {
     fi
   fi
 
-  # [新增] 清理锁文件
+  # 清理新的锁文件
+  rm -f "${lock_file}"
+  # [兼容] 清理旧的锁文件
   rm -f "/tmp/audioctl_router.lock"
 
   # 清理共享内存（如果存在）
