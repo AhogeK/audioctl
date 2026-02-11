@@ -149,27 +149,41 @@ kill_audioctl_processes() {
   log_success "进程清理完成"
 }
 
-# 检查是否有音频应用正在运行
-check_running_audio_apps() {
+# 关键音频应用列表 - 这些应用如果正在运行，需要用户手动退出
+# 原因：这些应用通常涉及未保存的工程/项目，直接重启 CoreAudio 可能导致数据丢失
+declare -a CRITICAL_AUDIO_APPS=(
+  "Logic Pro"
+  "Logic Pro X"
+  "GarageBand"
+  "Pro Tools"
+  "Ableton Live"
+  "Cubase"
+  "Studio One"
+  "Reaper"
+  "Reason"
+  "FL Studio"
+)
+
+# 普通音频应用列表
+declare -a NORMAL_AUDIO_APPS=(
+  "Music"
+  "Spotify"
+  "Zoom"
+  "FaceTime"
+  "QuickTime Player"
+  "VLC"
+  "IINA"
+  "Safari"
+  "Chrome"
+)
+
+# 检查是否有关键音频应用正在运行
+# 返回值：0=有关键应用运行，1=没有
+# 输出：正在运行的关键应用列表
+check_critical_audio_apps() {
   local apps=""
 
-  # 检查常见音频应用
-  local audio_apps=(
-    "Music"
-    "Spotify"
-    "Logic Pro"
-    "Logic Pro X"
-    "GarageBand"
-    "Zoom"
-    "FaceTime"
-    "QuickTime Player"
-    "VLC"
-    "IINA"
-    "Safari"
-    "Chrome"
-  )
-
-  for app in "${audio_apps[@]}"; do
+  for app in "${CRITICAL_AUDIO_APPS[@]}"; do
     if pgrep -x "${app}" >/dev/null 2>&1 || pgrep -f "${app}" >/dev/null 2>&1; then
       apps="${apps}${app}, "
     fi
@@ -180,6 +194,55 @@ check_running_audio_apps() {
 
   if [[ -n "${apps}" ]]; then
     echo "${apps}"
+    return 0
+  fi
+
+  return 1
+}
+
+# 检查是否有普通音频应用正在运行
+check_normal_audio_apps() {
+  local apps=""
+
+  for app in "${NORMAL_AUDIO_APPS[@]}"; do
+    if pgrep -x "${app}" >/dev/null 2>&1 || pgrep -f "${app}" >/dev/null 2>&1; then
+      apps="${apps}${app}, "
+    fi
+  done
+
+  # 去除末尾的逗号和空格
+  apps="${apps%, }"
+
+  if [[ -n "${apps}" ]]; then
+    echo "${apps}"
+    return 0
+  fi
+
+  return 1
+}
+
+# [兼容] 旧的函数名，现在检查所有音频应用
+check_running_audio_apps() {
+  local critical_apps=""
+  local normal_apps=""
+  local all_apps=""
+
+  if check_critical_audio_apps >/dev/null 2>&1; then
+    critical_apps=$(check_critical_audio_apps)
+    all_apps="${critical_apps}"
+  fi
+
+  if check_normal_audio_apps >/dev/null 2>&1; then
+    normal_apps=$(check_normal_audio_apps)
+    if [[ -n "${all_apps}" ]]; then
+      all_apps="${all_apps}, ${normal_apps}"
+    else
+      all_apps="${normal_apps}"
+    fi
+  fi
+
+  if [[ -n "${all_apps}" ]]; then
+    echo "${all_apps}"
     return 0
   fi
 
@@ -205,20 +268,46 @@ coreaudio_kickstart_once() {
   log_warn "  • 浏览器中的音频/视频播放"
   log_warn ""
 
-  # 检测正在运行的音频应用
+  # [严格检查] 检测关键音频应用（必须退出）
+  local critical_apps
+  if critical_apps=$(check_critical_audio_apps); then
+    log_error ""
+    log_error "═══════════════════════════════════════════════════════════"
+    log_error "🛑 检测到关键音频应用正在运行"
+    log_error "═══════════════════════════════════════════════════════════"
+    log_error ""
+    log_error "以下应用必须退出后才能继续："
+    log_error "  ${critical_apps}"
+    log_error ""
+    log_error "原因："
+    log_error "  这些应用通常涉及未保存的工程或项目文件，"
+    log_error "  直接重启 CoreAudio 可能导致数据丢失。"
+    log_error ""
+    log_error "请执行以下操作："
+    log_error "  1. 保存所有工作并退出上述应用"
+    log_error "  2. 重新运行此安装脚本"
+    log_error ""
+    log_error "或者使用 --no-coreaudio-restart 参数跳过重启："
+    log_error "  ./scripts/install.sh install --no-coreaudio-restart"
+    log_error "═══════════════════════════════════════════════════════════"
+    echo ""
+    return 1
+  fi
+
+  # [普通检查] 检测普通音频应用（仅警告）
   local running_apps
-  if running_apps=$(check_running_audio_apps); then
+  if running_apps=$(check_normal_audio_apps); then
     log_warn "检测到以下音频相关应用正在运行："
     log_warn "  ${running_apps}"
     log_warn ""
+    log_warn "这些应用将在重启后恢复，但当前会话会被中断！"
+    log_warn ""
   fi
 
-  log_warn "这些应用将在重启后恢复，但当前会话会被中断！"
-  log_warn ""
   log_warn "建议操作："
   log_warn "  • 先手动暂停或保存您的工作"
   log_warn "  • 或使用 --no-coreaudio-restart 参数跳过重启"
-  log_warn "  • 稍后手动运行：sudo launchctl kickstart -k system/com.apple.audio.coreaudiod"
+  log_warn "  • 稍后手动运行：sudo launchctl kickstart -k system/com.apple.coreaudiod"
   log_warn "═══════════════════════════════════════════════════════════"
   echo ""
 
