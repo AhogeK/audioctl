@@ -40,7 +40,7 @@ static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 i
         return noErr;
     }
 
-    bool shouldReconfigure = false;
+    bool shouldDeactivate = false;
 
     for (UInt32 i = 0; i < inNumberAddresses; i++)
     {
@@ -55,18 +55,19 @@ static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 i
             continue;
         }
 
-        AudioDeviceID currentPhysical = aggregate_device_get_physical_device();
-        if (currentPhysical == kAudioObjectUnknown)
+        // [健康检查] 检查 Aggregate Device 是否健康
+        if (!aggregate_device_is_healthy())
         {
-            printf("⚠️ 物理设备已断开\n");
-            // 不再自动重新配置，避免递归 - 让用户手动处理
-            shouldReconfigure = true;
+            printf("⚠️ 检测到 Aggregate Device 状态异常（物理设备可能已断开）\n");
+            shouldDeactivate = true;
         }
     }
 
-    if (shouldReconfigure)
+    if (shouldDeactivate)
     {
-        // atomic_store(&g_lastListenerTime, now); // Moved below to be unconditional
+        printf("🔄 正在执行安全回退：切换回系统默认物理设备...\n");
+        // 安全回退：停用 Aggregate Device，恢复到最佳可用的物理设备
+        aggregate_device_deactivate();
     }
 
     // Update time regardless of outcome to throttle ALL checks
@@ -545,6 +546,50 @@ AudioDeviceID aggregate_device_get_physical_device(void)
         }
     }
     return kAudioObjectUnknown;
+}
+
+static bool check_device_alive(AudioDeviceID deviceId)
+{
+    if (deviceId == kAudioObjectUnknown) return false;
+
+    AudioObjectPropertyAddress addr = {
+        kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+    };
+
+    UInt32 isAlive = 0;
+    UInt32 size = sizeof(isAlive);
+    OSStatus status = AudioObjectGetPropertyData(deviceId, &addr, 0, NULL, &size, &isAlive);
+
+    return (status == noErr && isAlive);
+}
+
+bool aggregate_device_is_healthy(void)
+{
+    // 1. 获取 Aggregate Device 信息
+    AggregateDeviceInfo info;
+    if (!aggregate_device_get_info(&info)) return false;
+
+    // 2. 检查是否有物理设备
+    AudioDeviceID physicalDevice = aggregate_device_get_physical_device();
+    if (physicalDevice == kAudioObjectUnknown)
+    {
+        // 只有虚拟设备，没有物理设备 -> 不健康
+        return false;
+    }
+
+    // 3. 检查物理设备是否存活
+    if (!check_device_alive(physicalDevice))
+    {
+        return false;
+    }
+
+    // 4. 检查是否有虚拟设备
+    if (!aggregate_device_contains_virtual(&info))
+    {
+        return false;
+    }
+
+    return true;
 }
 
 bool aggregate_device_contains_virtual(const AggregateDeviceInfo* info)

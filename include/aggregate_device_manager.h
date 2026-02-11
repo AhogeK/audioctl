@@ -89,4 +89,7 @@ bool aggregate_device_contains_physical(const AggregateDeviceInfo* info, AudioDe
 // 获取 Aggregate Device 中使用的物理设备
 AudioDeviceID aggregate_device_get_physical_device(void);
 
+// 检查 Aggregate Device 是否健康（所有子设备都有效）
+bool aggregate_device_is_healthy(void);
+
 #endif //AUDIOCTL_AGGREGATE_DEVICE_MANAGER_H
