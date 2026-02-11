@@ -51,46 +51,13 @@ Agent 在执行任务前，必须遵循以下认知流程：
     - **Execute**: 严格按照计划执行，遇到阻碍及时修正计划。
     - **Verify**: 每个阶段完成后必须进行构建测试或功能验证。
 
-4. **Root 权限管理 (Critical - 零容忍 - 每次交互必检)**:
-    - **零次规则**: 权限问题零容忍。**每次执行命令前、修改文件前、会话开始时**，必须检查并修复权限。
-    - **自动修复**: 发现 root 拥有的文件**立即执行** `sudo chown -R $(stat -f "%Su" ~):staff .`，不再询问。
-    - **默认假设**: **永远假设用户是普通用户**。即使当前是 root shell，也视为异常状态。
-
-   **强制检查（每次交互必须执行）**:
-    ```bash
-    # 检查并修复权限
-    find . -maxdepth 2 -type d \( -name "cmake-build-*" -o -name "scripts" -o -name ".git" \) -exec ls -ld {} \; 2>/dev/null | grep -E "root|wheel" && sudo chown -R $(stat -f "%Su" ~):staff .
-    ```
-
-   **禁止行为**:
-    - ❌ 在 root shell 中执行任何文件操作（写入、创建、修改）
-    - ❌ 在 root shell 中运行 git 命令
-    - ❌ 在 root shell 中启动 IDE/编辑器
-    - ❌ 假设当前权限状态正确
-    - ❌ 连续执行多条命令后才检查权限（必须每条后都检查）
-
-   **必须立即修复的情况**:
-    - 任何文件显示 `root` 或 `wheel` 所有者
-    - IDE 提示 "Read-Only" 或 "Permission Denied"
-    - 构建失败且提示 "Operation not permitted"
-    - git 操作失败
-
-   **准则**: 只有拷贝到 `/Library` 等系统目录时才使用 sudo，且**立即**修复工作区权限。
-
-   **路径陷阱**: 代码中获取 HOME 目录必须使用 `getlogin()` 获取实际登录用户，绝不能使用 `getenv("HOME")` 或 `getuid()`。
-
-   **事故记录**:
-    - 2026-02-12: install.sh 被 root 拥有，IDE 无法保存（第 3 次权限事故）
-    - 2026-02-12: cmake-build-debug 目录被 root 拥有，构建失败（第 2 次）
-    - 2026-02-11: 构建产物被 root 拥有，用户无法修改（第 1 次）
-
-5. **阶段性停顿与提交协议 (Phase Checkpoints)**:
+4. **阶段性停顿与提交协议 (Phase Checkpoints)**:
     - **自动保存意识**: 严禁在没有中间确认的情况下进行超大规模的代码改动。
     - **主动停顿**: 每当完成一个具有独立意义的子任务（如：成功定义了 IPC 协议、完成了一个核心函数的重构并通过编译）时，Agent
       **必须**主动停顿，展示当前变更并建议用户进行 `git commit`。
     - **防混乱回退**: 坚持“小步快跑”原则。频繁的小规模提交能确保在后续步骤出错时，系统可以安全回滚到最近的稳定节点，避免代码混乱。
 
-6. **系统洁净度与残留管理 (System Cleanliness)**:
+5. **系统洁净度与残留管理 (System Cleanliness)**:
     - **卸载闭环**: 在重构或废弃功能时，Agent 必须主动检查并清理系统级残留，包括但不限于：
         - `~/Library/LaunchAgents/` 和 `/Library/LaunchDaemons/` 中的 `.plist` 文件。
         - `/usr/local/bin/` 或 `/usr/local/libexec/` 中的残留二进制。
