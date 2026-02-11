@@ -119,19 +119,35 @@ kill_audioctl_processes() {
     rm -f /tmp/audioctl_router.pid
   fi
 
-  # 杀死任何残留的 audioctl 进程 (Safety Net)
-  local audioctl_pids
-  audioctl_pids="$(pgrep -f 'audioctl internal-route' 2>/dev/null)" || true
-  if [[ -n "${audioctl_pids}" ]]; then
-    log_warn "发现残留 audioctl 进程，正在清理..."
-    echo "${audioctl_pids}" | xargs -I {} kill -TERM {} 2>/dev/null || true
-    sleep 1
-    # 强制清理
-    audioctl_pids="$(pgrep -f 'audioctl internal-route' 2>/dev/null)" || true
-    if [[ -n "${audioctl_pids}" ]]; then
+  # [增强] 杀死任何名为 audioctl 的进程 (包括前台进程)
+  # 循环检查直到进程完全消失，防止死锁
+  local max_retries=10
+  local retry=0
+
+  while true; do
+    local audioctl_pids
+    audioctl_pids="$(pgrep -x audioctl 2>/dev/null)" || true
+
+    if [[ -z "${audioctl_pids}" ]]; then
+      break
+    fi
+
+    if ((retry == 0)); then
+      log_warn "发现残留 audioctl 进程，正在清理..."
+      echo "${audioctl_pids}" | xargs -I {} kill -TERM {} 2>/dev/null || true
+    elif ((retry >= 3)); then
+      log_warn "audioctl 进程响应缓慢，强制杀死..."
       echo "${audioctl_pids}" | xargs -I {} kill -KILL {} 2>/dev/null || true
     fi
-  fi
+
+    if ((retry >= max_retries)); then
+      log_error "无法杀死 audioctl 进程，这可能会导致安装失败"
+      break
+    fi
+
+    sleep 0.5
+    retry=$((retry + 1))
+  done
 
   # 清理新的锁文件
   rm -f "${lock_file}"
@@ -325,6 +341,9 @@ coreaudio_kickstart_once() {
 
   # 在重启前先清理所有相关进程
   kill_audioctl_processes
+
+  # 额外等待以确保端口释放
+  sleep 1
 
   log_info "重启 CoreAudio（仅一次）..."
   sudo /bin/launchctl kickstart -k system/com.apple.audio.coreaudiod 2>/dev/null || true

@@ -80,19 +80,10 @@ AppVolumeInfo* app_volume_find(pid_t pid);
 // 获取当前正在播放音频的应用数量
 UInt32 app_volume_get_active_count(void);
 
-#pragma mark - 共享内存（用于驱动通信）
+#pragma mark - 驱动通信
 
-// 创建/打开共享内存区域
-OSStatus app_volume_shm_init(void);
-
-// 关闭共享内存
-void app_volume_shm_cleanup(void);
-
-// 将当前音量列表同步到共享内存
-OSStatus app_volume_sync_to_shm(void);
-
-// 从共享内存同步音量列表
-OSStatus app_volume_sync_from_shm(void);
+// 将当前音量列表同步到驱动 (通过 IPC)
+OSStatus app_volume_sync_to_driver(void);
 
 #pragma mark - 命令行接口
 

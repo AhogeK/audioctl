@@ -97,7 +97,7 @@ set_target_properties(virtual_audio_driver PROPERTIES
         OSX_ARCHITECTURES "arm64e"
 )
 
-# 链接驱动插件需要的框架
+# 链接驱动插件需要的框架和库
 target_link_libraries(virtual_audio_driver PRIVATE
         ${CORE_AUDIO_LIBRARY}
         ${CORE_FOUNDATION_LIBRARY}
@@ -122,7 +122,7 @@ list(REMOVE_ITEM SOURCE_FILES
 # 添加主可执行文件
 add_executable(audioctl ${SOURCE_FILES} ${HEADER_FILES})
 
-# 链接主程序需要的框架
+# 链接主程序需要的框架和库
 target_link_libraries(audioctl PRIVATE
         ${CORE_AUDIO_LIBRARY}
         ${CORE_FOUNDATION_LIBRARY}

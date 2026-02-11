@@ -15,106 +15,16 @@
     NSArray *runningApps = [workspace runningApplications];
     NSMutableArray *audioApps = [NSMutableArray array];
 
-    // 获取系统默认输出设备
-    AudioDeviceID outputDevice = 0;
-    UInt32 propertySize = sizeof(AudioDeviceID);
-    AudioObjectPropertyAddress propertyAddress = {
-            .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
-            .mScope = kAudioObjectPropertyScopeGlobal,
-            .mElement = kAudioObjectPropertyElementMain
-    };
-
-    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
-                                                 &propertyAddress,
-                                                 0,
-                                                 NULL,
-                                                 &propertySize,
-                                                 &outputDevice);
-
-    if (status != noErr) {
-        NSLog(@"Error getting default output device: %d", (int) status);
-        return audioApps;
-    }
-
-    // 获取输出设备的流属性
-    AudioObjectPropertyAddress streamAddress = {
-            .mSelector = kAudioDevicePropertyStreamConfiguration,
-            .mScope = kAudioDevicePropertyScopeOutput,
-            .mElement = kAudioObjectPropertyElementMain
-    };
-
-    status = AudioObjectGetPropertyDataSize(outputDevice,
-                                            &streamAddress,
-                                            0,
-                                            NULL,
-                                            &propertySize);
-
-    if (status != noErr) {
-        NSLog(@"Error getting stream configuration size: %d", (int) status);
-        return audioApps;
-    }
-
-    // 修改：使用 NSMutableData 来管理内存，避免手动管理
-    NSMutableData *bufferData = [NSMutableData dataWithLength:propertySize];
-    AudioBufferList *bufferList = (AudioBufferList *) bufferData.mutableBytes;
-
-    if (bufferList == NULL) {
-        return audioApps;
-    }
-
-    status = AudioObjectGetPropertyData(outputDevice,
-                                        &streamAddress,
-                                        0,
-                                        NULL,
-                                        &propertySize,
-                                        bufferList);
-
-    if (status == noErr) {
-        // 检查每个运行的应用是否在使用音频
-        for (NSRunningApplication *app in runningApps) {
-            if (app.activationPolicy == NSApplicationActivationPolicyRegular) {
-                // 检查进程是否在使用音频设备
-                AudioObjectPropertyAddress processAddress = {
-                        .mSelector = kAudioDevicePropertyDeviceIsAlive,
-                        .mScope = kAudioDevicePropertyScopeOutput,
-                        .mElement = kAudioObjectPropertyElementMain
-                };
-
-                UInt32 isAlive = 0;
-                propertySize = sizeof(UInt32);
-                status = AudioObjectGetPropertyData(outputDevice,
-                                                    &processAddress,
-                                                    0,
-                                                    NULL,
-                                                    &propertySize,
-                                                    &isAlive);
-
-                if (status == noErr && isAlive) {
-                    // 检查进程是否有音频输出
-                    AudioObjectPropertyAddress outputAddress = {
-                            .mSelector = kAudioDevicePropertyStreamFormat,
-                            .mScope = kAudioDevicePropertyScopeOutput,
-                            .mElement = kAudioObjectPropertyElementMain
-                    };
-
-                    AudioStreamBasicDescription streamFormat;
-                    propertySize = sizeof(AudioStreamBasicDescription);
-                    status = AudioObjectGetPropertyData(outputDevice,
-                                                        &outputAddress,
-                                                        0,
-                                                        NULL,
-                                                        &propertySize,
-                                                        &streamFormat);
-
-                    if (status == noErr && streamFormat.mChannelsPerFrame > 0) {
-                        [audioApps addObject:app];
-                    }
-                }
-            }
+    // 直接列出所有常规应用，不依赖 CoreAudio 状态
+    // 这样即使 HAL 挂了，我们也能预设音量
+    for (NSRunningApplication *app in runningApps) {
+        // 放宽条件：包括 Regular (0) 和 Accessory (1)
+        // 排除 Prohibited (2) 即后台守护进程
+        if (app.activationPolicy != NSApplicationActivationPolicyProhibited) {
+            [audioApps addObject:app];
         }
     }
-
-    // 不需要手动 free，NSMutableData 会自动管理内存
+    
     return audioApps;
 }
 

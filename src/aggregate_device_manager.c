@@ -65,9 +65,25 @@ static OSStatus device_listener_proc(AudioObjectID __unused inObjectID, UInt32 i
 
     if (shouldDeactivate)
     {
-        printf("🔄 正在执行安全回退：切换回系统默认物理设备...\n");
-        // 安全回退：停用 Aggregate Device，恢复到最佳可用的物理设备
-        aggregate_device_deactivate();
+        // [安全网] 检查 HAL 是否处于可交互状态
+        // 尝试读取一个简单的全局属性，如果失败，说明 HAL 正在重启或挂起，此时绝对不能调用 SetProperty
+        AudioDeviceID defaultDev;
+        UInt32 size = sizeof(defaultDev);
+        AudioObjectPropertyAddress addr = {
+            kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+        };
+        OSStatus probeStatus = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, NULL, &size, &defaultDev);
+
+        if (probeStatus != noErr)
+        {
+            printf("⚠️ HAL 状态异常 (%d)，跳过自动回退操作以防止死锁\n", probeStatus);
+        }
+        else
+        {
+            printf("🔄 正在执行安全回退：切换回系统默认物理设备...\n");
+            // 安全回退：停用 Aggregate Device，恢复到最佳可用的物理设备
+            aggregate_device_deactivate();
+        }
     }
 
     // Update time regardless of outcome to throttle ALL checks

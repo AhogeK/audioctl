@@ -6,8 +6,8 @@
 #ifndef AUDIOCTL_APP_VOLUME_DRIVER_H
 #define AUDIOCTL_APP_VOLUME_DRIVER_H
 
-#include <CoreAudio/AudioServerPlugIn.h>
 #include <stdbool.h>
+#include "audio_common_types.h"
 
 #pragma mark - 初始化和清理
 
@@ -27,6 +27,20 @@ OSStatus app_volume_driver_remove_client(UInt32 clientID);
 
 // 根据ClientID查找PID
 pid_t app_volume_driver_get_pid(UInt32 clientID);
+
+#pragma mark - 属性访问
+
+// 设置整个音量表 (来自 SetPropertyData)
+OSStatus app_volume_driver_set_table(const AppVolumeTable* table);
+
+// 获取整个音量表 (来自 GetPropertyData)
+OSStatus app_volume_driver_get_table(AppVolumeTable* table);
+
+// 获取当前连接的客户端PID列表
+// outPids: 调用者提供的缓冲区
+// maxCount: 缓冲区最大容量
+// outActualCount: 实际返回的PID数量
+OSStatus app_volume_driver_get_client_pids(pid_t* outPids, UInt32 maxCount, UInt32* outActualCount);
 
 #pragma mark - 音量应用
 

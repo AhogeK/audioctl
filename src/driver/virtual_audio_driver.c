@@ -22,6 +22,7 @@ static UInt64 gDevice_NumberTimeStamps = 0;
 static UInt64 gDevice_AnchorHostTime = 0;
 
 // Forward Declarations
+
 static HRESULT VirtualAudioDriver_QueryInterface(void* inDriver, REFIID inUUID, LPVOID* outInterface);
 static ULONG VirtualAudioDriver_AddRef(void* inDriver);
 static ULONG VirtualAudioDriver_Release(void* inDriver);
@@ -150,6 +151,7 @@ static OSStatus VirtualAudioDriver_Initialize(AudioServerPlugInDriverRef __unuse
     Float64 freq = (Float64)tb.denom / (Float64)tb.numer * 1000000000.0;
     gDevice_HostTicksPerFrame = freq / gDevice_SampleRate;
     app_volume_driver_init();
+
     return 0;
 }
 
@@ -310,7 +312,9 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
             inAddress->mSelector == kAudioDevicePropertyDeviceCanBeDefaultDevice ||
             inAddress->mSelector == kAudioDevicePropertyDeviceCanBeDefaultSystemDevice ||
             inAddress->mSelector == kAudioDevicePropertyDeviceIsAlive ||
-            inAddress->mSelector == kAudioDevicePropertyDeviceIsRunning);
+            inAddress->mSelector == kAudioDevicePropertyDeviceIsRunning ||
+            inAddress->mSelector == kAudioDevicePropertyAppVolumes ||
+            inAddress->mSelector == kAudioDevicePropertyAppClientList);
     case kObjectID_Stream_Output: return true;
     default: break;
     }
@@ -320,9 +324,14 @@ static Boolean VirtualAudioDriver_HasProperty(AudioServerPlugInDriverRef __unuse
 static OSStatus VirtualAudioDriver_IsPropertySettable(AudioServerPlugInDriverRef __unused inDriver,
                                                       AudioObjectID __unused inObjectID,
                                                       pid_t __unused inClientProcessID,
-                                                      const AudioObjectPropertyAddress* __unused inAddress,
+                                                      const AudioObjectPropertyAddress* inAddress,
                                                       Boolean* outIsSettable)
 {
+    if (inAddress->mSelector == kAudioDevicePropertyAppVolumes)
+    {
+        *outIsSettable = true;
+        return 0;
+    }
     *outIsSettable = false;
     return 0;
 }
@@ -333,6 +342,22 @@ static OSStatus VirtualAudioDriver_GetPropertyDataSize(AudioServerPlugInDriverRe
                                                        UInt32 __unused inQualifierDataSize,
                                                        const void* __unused inQualifierData, UInt32* outDataSize)
 {
+    // 检查自定义属性（仅对 Device 对象支持）
+    if (inObjectID == kObjectID_Device)
+    {
+        if (inAddress->mSelector == kAudioDevicePropertyAppVolumes)
+        {
+            *outDataSize = sizeof(AppVolumeTable);
+            return 0;
+        }
+        else if (inAddress->mSelector == kAudioDevicePropertyAppClientList)
+        {
+            // 最大客户端数 * PID大小 + count字段
+            *outDataSize = sizeof(UInt32) + MAX_APP_ENTRIES * sizeof(pid_t);
+            return 0;
+        }
+    }
+
     if ((inObjectID == kObjectID_Device && inAddress->mSelector == kAudioDevicePropertyStreams) ||
         (inObjectID == kObjectID_PlugIn && inAddress->mSelector == kAudioPlugInPropertyDeviceList))
     {
@@ -442,6 +467,40 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
             *((UInt32*)outData) = 1;
             *outDataSize = sizeof(UInt32);
             break;
+        case kAudioDevicePropertyAppVolumes:
+            if (*outDataSize >= sizeof(AppVolumeTable))
+            {
+                app_volume_driver_get_table((AppVolumeTable*)outData);
+                *outDataSize = sizeof(AppVolumeTable);
+            }
+            break;
+        case kAudioDevicePropertyAppClientList:
+            {
+                // 返回当前连接的客户端PID列表
+                // 数据格式: UInt32 count + pid_t pids[]
+                // 即使客户端列表为空，也返回 count=0 和空列表
+                UInt32 minSize = sizeof(UInt32);
+
+                if (*outDataSize < minSize)
+                {
+                    // 缓冲区太小
+                    *outDataSize = minSize;
+                    break;
+                }
+
+                // 计算最多能返回多少 PID
+                UInt32 availableSpace = *outDataSize - sizeof(UInt32);
+                UInt32 maxPids = availableSpace / sizeof(pid_t);
+
+                pid_t* pids = (pid_t*)((UInt8*)outData + sizeof(UInt32));
+                UInt32 actualCount = 0;
+
+                app_volume_driver_get_client_pids(pids, maxPids, &actualCount);
+
+                *(UInt32*)outData = actualCount;
+                *outDataSize = sizeof(UInt32) + actualCount * sizeof(pid_t);
+            }
+            break;
         default:
             break;
         }
@@ -502,7 +561,14 @@ static OSStatus VirtualAudioDriver_AddDeviceClient(AudioServerPlugInDriverRef __
                                                    AudioObjectID __unused inDeviceObjectID,
                                                    const AudioServerPlugInClientInfo* inClientInfo)
 {
-    if (inClientInfo) app_volume_driver_add_client(inClientInfo->mClientID, inClientInfo->mProcessID, NULL, NULL);
+    if (inClientInfo)
+    {
+        // Register with local driver
+        app_volume_driver_add_client(inClientInfo->mClientID, inClientInfo->mProcessID, NULL, NULL);
+
+        // TODO: Register with IPC Service (Unix Domain Socket)
+        // This will be implemented in the new IPC architecture
+    }
     return 0;
 }
 
@@ -510,7 +576,14 @@ static OSStatus VirtualAudioDriver_RemoveDeviceClient(AudioServerPlugInDriverRef
                                                       AudioObjectID __unused inDeviceObjectID,
                                                       const AudioServerPlugInClientInfo* inClientInfo)
 {
-    if (inClientInfo) app_volume_driver_remove_client(inClientInfo->mClientID);
+    if (inClientInfo)
+    {
+        // Unregister from local driver
+        app_volume_driver_remove_client(inClientInfo->mClientID);
+
+        // TODO: Unregister from IPC Service (Unix Domain Socket)
+        // This will be implemented in the new IPC architecture
+    }
     return 0;
 }
 
@@ -545,3 +618,8 @@ static OSStatus VirtualAudioDriver_EndIOOperation(AudioServerPlugInDriverRef __u
 {
     return 0;
 }
+
+#pragma mark - Helper Functions
+
+// Helper functions can be added here
+// TODO: Add IPC client helpers when implementing Unix Domain Socket
