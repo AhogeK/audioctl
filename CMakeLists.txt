@@ -41,6 +41,32 @@ include_directories(
 set(PLUGIN_OUTPUT_DIR "${CMAKE_BINARY_DIR}/plugins")
 set(DRIVER_OUTPUT_NAME "VirtualAudioDriver")
 
+# ============================================================================
+# IPC 静态库 (audioctl_ipc)
+# ============================================================================
+# 用于驱动插件和主程序之间的通信
+set(IPC_SOURCES
+        "${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c"
+)
+
+set(IPC_HEADERS
+        "${CMAKE_SOURCE_DIR}/include/ipc/ipc_protocol.h"
+)
+
+add_library(audioctl_ipc STATIC ${IPC_SOURCES} ${IPC_HEADERS})
+
+# 设置 IPC 库属性
+set_target_properties(audioctl_ipc PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
+        POSITION_INDEPENDENT_CODE ON
+        OSX_ARCHITECTURES "arm64;arm64e"
+)
+
+target_include_directories(audioctl_ipc PUBLIC
+        "${CMAKE_SOURCE_DIR}/include"
+)
+
 # 定义资源文件
 set(LOCALIZED_RESOURCES
         "${CMAKE_SOURCE_DIR}/en.lproj/Localizable.strings"
@@ -101,6 +127,7 @@ set_target_properties(virtual_audio_driver PROPERTIES
 target_link_libraries(virtual_audio_driver PRIVATE
         ${CORE_AUDIO_LIBRARY}
         ${CORE_FOUNDATION_LIBRARY}
+        audioctl_ipc
 )
 
 # 查找源文件（排除驱动相关文件）
@@ -114,9 +141,11 @@ file(GLOB_RECURSE HEADER_FILES
 )
 
 # 从主程序源文件中排除驱动相关源文件（驱动是单独编译的）
+# 同时排除 IPC 源文件（已在 audioctl_ipc 静态库中）
 list(REMOVE_ITEM SOURCE_FILES
         "${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_driver.c"
         "${CMAKE_SOURCE_DIR}/src/driver/app_volume_driver.c"
+        "${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c"
 )
 
 # 添加主可执行文件
@@ -130,6 +159,7 @@ target_link_libraries(audioctl PRIVATE
         ${FOUNDATION_LIBRARY}
         ${APPKIT_LIBRARY}
         pthread
+        audioctl_ipc
 )
 
 # 链接 Aggregate Device 需要的 AudioUnit 框架

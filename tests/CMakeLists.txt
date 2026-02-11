@@ -10,6 +10,7 @@ add_executable(test_virtual_audio_device
         test_app_volume_control.c
         test_virtual_device_manager.c
         test_aggregate_device_manager.c
+        test_ipc_protocol.c
 )
 
 # 链接需要测试的源文件
@@ -19,6 +20,8 @@ target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/virtual_device_manager.c
         ${CMAKE_SOURCE_DIR}/src/aggregate_device_manager.c
         ${CMAKE_SOURCE_DIR}/src/aggregate_volume_proxy.c
+        ${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c
+        ${CMAKE_SOURCE_DIR}/src/constants.c
 )
 
 # 添加包含目录
