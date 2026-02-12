@@ -50,4 +50,7 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted);
 // 应用音量到音频缓冲区
 void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameCount, UInt32 channels);
 
-#endif //AUDIOCTL_APP_VOLUME_DRIVER_H
+// 应用音量到 Non-Interleaved 音频缓冲区（左右声道分离）
+void app_volume_driver_apply_volume_ni(UInt32 clientID, void* leftBuffer, void* rightBuffer, UInt32 frameCount);
+
+#endif // AUDIOCTL_APP_VOLUME_DRIVER_H

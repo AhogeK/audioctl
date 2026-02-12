@@ -268,6 +268,29 @@ static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef 
     return 0;
 }
 
+// ABL 布局验证：Non-Interleaved 格式下应为双缓冲区
+static inline int validate_abl_noninterleaved(const AudioBufferList* abl, UInt32 ch, UInt32 frames)
+{
+    if (abl->mNumberBuffers != ch)
+        return 0;
+    for (UInt32 b = 0; b < ch; b++)
+    {
+        const AudioBuffer* buffer = (const AudioBuffer*)((const uint8_t*)&abl->mBuffers[0] + (b * sizeof(AudioBuffer)));
+        if (buffer->mNumberChannels != 1)
+            return 0;
+        if (!buffer->mData)
+            return 0;
+        if (buffer->mDataByteSize < frames * sizeof(Float32))
+            return 0;
+    }
+    return 1;
+}
+
+// 错误布局计数器（原子，用于调试）
+static atomic_uint_fast64_t gABLBadLayoutCount = 0;
+
+static inline void note_bad_abl(void) { atomic_fetch_add(&gABLBadLayoutCount, 1); }
+
 static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __unused inDriver,
                                                  AudioObjectID __unused inDeviceObjectID,
                                                  AudioObjectID __unused inStreamObjectID, UInt32 inClientID,
@@ -278,23 +301,48 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
     if (!ioMainBuffer || inIOBufferFrameSize == 0)
         return 0;
 
-    // 处理输出操作：应用音量控制并存储到 loopback 缓冲区
-    if (inOperationID == kAudioServerPlugInIOOperationWriteMix ||
-        inOperationID == kAudioServerPlugInIOOperationProcessOutput ||
-        inOperationID == kAudioServerPlugInIOOperationProcessMix)
+    // 验证 ABL 布局（Non-Interleaved 应为双缓冲区）
+    AudioBufferList* abl = (AudioBufferList*)ioMainBuffer;
+    if (!validate_abl_noninterleaved(abl, 2, inIOBufferFrameSize))
     {
-        Float32* buf = (Float32*)ioMainBuffer;
-        UInt32 frames = inIOBufferFrameSize;
-        UInt32 sampleCount = frames * 2; // 2 channels
-
-        // [实时音频路径 - 热路径 Hot Path]
-        app_volume_driver_apply_volume(inClientID, buf, frames, 2);
-
-        // [关键] 将处理后的音频数据复制到 loopback 缓冲区
-        UInt32 writePos = atomic_load(&gLoopbackWritePos);
-        for (UInt32 i = 0; i < sampleCount; i++)
+        note_bad_abl();
+        // 布局错误，清空数据防止杂音
+        for (UInt32 b = 0; b < abl->mNumberBuffers; b++)
         {
-            gLoopbackBuffer[writePos] = buf[i];
+            AudioBuffer* buf = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0] + (b * sizeof(AudioBuffer)));
+            if (buf->mData)
+            {
+                memset(buf->mData, 0, buf->mDataByteSize);
+            }
+        }
+        return 0;
+    }
+
+    AudioBuffer* leftBuffer = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0]);
+    AudioBuffer* rightBuffer = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0] + sizeof(AudioBuffer));
+    Float32* leftChannel = (Float32*)leftBuffer->mData;
+    Float32* rightChannel = (Float32*)rightBuffer->mData;
+    UInt32 frames = inIOBufferFrameSize;
+
+    // 处理输出操作：应用音量控制并存储到 loopback 缓冲区
+    if (inOperationID == kAudioServerPlugInIOOperationProcessOutput)
+    {
+        // [实时音频路径 - 热路径 Hot Path]
+        // 对每个声道分别应用音量（in-place 处理）
+        app_volume_driver_apply_volume_ni(inClientID, leftChannel, rightChannel, frames);
+    }
+    else if (inOperationID == kAudioServerPlugInIOOperationWriteMix)
+    {
+        // 将处理后的音频数据写入 loopback 缓冲区（平面存储）
+        // 交错格式写入：LRLRLR...
+        UInt32 writePos = atomic_load(&gLoopbackWritePos);
+        for (UInt32 i = 0; i < frames; i++)
+        {
+            // 左声道
+            gLoopbackBuffer[writePos] = leftChannel[i];
+            writePos = (writePos + 1) % (sizeof(gLoopbackBuffer) / sizeof(gLoopbackBuffer[0]));
+            // 右声道
+            gLoopbackBuffer[writePos] = rightChannel[i];
             writePos = (writePos + 1) % (sizeof(gLoopbackBuffer) / sizeof(gLoopbackBuffer[0]));
         }
         atomic_store(&gLoopbackWritePos, writePos);
@@ -302,33 +350,37 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
     // 处理输入操作：从 loopback 缓冲区读取数据
     else if (inOperationID == kAudioServerPlugInIOOperationReadInput)
     {
-        Float32* buf = (Float32*)ioMainBuffer;
-        UInt32 frames = inIOBufferFrameSize;
-        UInt32 sampleCount = frames * 2; // 2 channels
-
         UInt32 readPos = atomic_load(&gLoopbackReadPos);
         UInt32 writePos = atomic_load(&gLoopbackWritePos);
+        UInt32 bufferSize = sizeof(gLoopbackBuffer) / sizeof(gLoopbackBuffer[0]);
 
-        // 计算可用数据量
+        // 计算可用数据量（以采样点计，每个采样点是一个声道）
         UInt32 available;
         if (writePos >= readPos)
             available = writePos - readPos;
         else
-            available = (sizeof(gLoopbackBuffer) / sizeof(gLoopbackBuffer[0])) - readPos + writePos;
+            available = bufferSize - readPos + writePos;
+
+        UInt32 sampleCount = frames * 2; // 总采样点数（左右声道）
 
         if (available >= sampleCount)
         {
-            for (UInt32 i = 0; i < sampleCount; i++)
+            for (UInt32 i = 0; i < frames; i++)
             {
-                buf[i] = gLoopbackBuffer[readPos];
-                readPos = (readPos + 1) % (sizeof(gLoopbackBuffer) / sizeof(gLoopbackBuffer[0]));
+                // 左声道
+                leftChannel[i] = gLoopbackBuffer[readPos];
+                readPos = (readPos + 1) % bufferSize;
+                // 右声道
+                rightChannel[i] = gLoopbackBuffer[readPos];
+                readPos = (readPos + 1) % bufferSize;
             }
             atomic_store(&gLoopbackReadPos, readPos);
         }
         else
         {
             // 数据不足，输出静音
-            memset(buf, 0, sampleCount * sizeof(Float32));
+            memset(leftChannel, 0, frames * sizeof(Float32));
+            memset(rightChannel, 0, frames * sizeof(Float32));
         }
     }
 

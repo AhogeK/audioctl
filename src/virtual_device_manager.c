@@ -376,10 +376,11 @@ OSStatus virtual_device_activate_with_router(void)
         return kAudioHardwareUnspecifiedError;
     }
 
-    // 4. 同时设为默认输入
-    propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
-    AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, sizeof(AudioDeviceID),
-                               &virtualDevice);
+    // 4. 【修复】不切换默认输入设备
+    // 根据用户需求，只切换 output，保持 input 不变
+    // propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+    // AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, sizeof(AudioDeviceID),
+    //                            &virtualDevice);
 
     // 5. 【修复】再次验证
     AudioDeviceID verifyOutput = get_default_output_device();

@@ -5,9 +5,9 @@
 // Uses IPC client with local cache for real-time audio processing
 
 #include "driver/app_volume_driver.h"
-#include "ipc/ipc_client.h"
 #include <os/lock.h>
 #include <stdatomic.h>
+#include "ipc/ipc_client.h"
 
 // 客户端条目结构
 typedef struct
@@ -191,7 +191,8 @@ pid_t app_volume_driver_get_pid(UInt32 clientID)
 
 OSStatus app_volume_driver_set_table(const AppVolumeTable* table)
 {
-    if (table == NULL) return kAudioHardwareIllegalOperationError;
+    if (table == NULL)
+        return kAudioHardwareIllegalOperationError;
 
     os_unfair_lock_lock(&g_tableLock);
     memcpy(&g_volumeTable, table, sizeof(AppVolumeTable));
@@ -202,7 +203,8 @@ OSStatus app_volume_driver_set_table(const AppVolumeTable* table)
 
 OSStatus app_volume_driver_get_table(AppVolumeTable* table)
 {
-    if (table == NULL) return kAudioHardwareIllegalOperationError;
+    if (table == NULL)
+        return kAudioHardwareIllegalOperationError;
 
     os_unfair_lock_lock(&g_tableLock);
     memcpy(table, &g_volumeTable, sizeof(AppVolumeTable));
@@ -213,7 +215,8 @@ OSStatus app_volume_driver_get_table(AppVolumeTable* table)
 
 OSStatus app_volume_driver_get_client_pids(pid_t* outPids, UInt32 maxCount, UInt32* outActualCount)
 {
-    if (outPids == NULL || outActualCount == NULL) return kAudioHardwareIllegalOperationError;
+    if (outPids == NULL || outActualCount == NULL)
+        return kAudioHardwareIllegalOperationError;
 
     os_unfair_lock_lock(&g_clientLock);
 
@@ -254,13 +257,15 @@ Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
         ipc_client_get_volume_fast(&g_ipcClient, pid, &volume, &isMuted);
     }
 
-    if (outIsMuted) *outIsMuted = isMuted;
+    if (outIsMuted)
+        *outIsMuted = isMuted;
     return volume;
 }
 
 void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameCount, UInt32 channels)
 {
-    if (buffer == NULL || frameCount == 0) return;
+    if (buffer == NULL || frameCount == 0)
+        return;
 
     bool isMuted = false;
     Float32 volume = app_volume_driver_get_volume(clientID, &isMuted);
@@ -273,7 +278,8 @@ void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameC
     }
 
     // 音量为 1.0 时直接返回（零拷贝）
-    if (volume >= 0.999f) return;
+    if (volume >= 0.999f)
+        return;
 
     // 应用音量
     Float32* samples = (Float32*)buffer;
@@ -283,5 +289,48 @@ void app_volume_driver_apply_volume(UInt32 clientID, void* buffer, UInt32 frameC
     for (UInt32 i = 0; i < totalSamples; i++)
     {
         samples[i] *= volume;
+    }
+}
+
+void app_volume_driver_apply_volume_ni(UInt32 clientID, void* leftBuffer, void* rightBuffer, UInt32 frameCount)
+{
+    if ((leftBuffer == NULL && rightBuffer == NULL) || frameCount == 0)
+        return;
+
+    bool isMuted = false;
+    Float32 volume = app_volume_driver_get_volume(clientID, &isMuted);
+
+    // 静音处理
+    if (isMuted)
+    {
+        if (leftBuffer)
+            memset(leftBuffer, 0, frameCount * sizeof(Float32));
+        if (rightBuffer)
+            memset(rightBuffer, 0, frameCount * sizeof(Float32));
+        return;
+    }
+
+    // 音量为 1.0 时直接返回（零拷贝）
+    if (volume >= 0.999f)
+        return;
+
+    // 应用音量到左右声道
+    Float32* leftSamples = (Float32*)leftBuffer;
+    Float32* rightSamples = (Float32*)rightBuffer;
+
+    // 简单标量乘法（分别处理左右声道）
+    if (leftSamples)
+    {
+        for (UInt32 i = 0; i < frameCount; i++)
+        {
+            leftSamples[i] *= volume;
+        }
+    }
+    if (rightSamples)
+    {
+        for (UInt32 i = 0; i < frameCount; i++)
+        {
+            rightSamples[i] *= volume;
+        }
     }
 }
