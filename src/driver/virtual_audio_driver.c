@@ -19,10 +19,13 @@ static UInt32 gPlugIn_RefCount = 0;
 static AudioServerPlugInHostRef gPlugIn_Host = NULL;
 static Float64 gDevice_SampleRate = 48000.0;
 static UInt64 gDevice_IOIsRunning = 0;
-static const UInt32 kDevice_RingBufferSize = 16384;
 static Float64 gDevice_HostTicksPerFrame = 0.0;
 static UInt64 gDevice_NumberTimeStamps = 0;
 static UInt64 gDevice_AnchorHostTime = 0;
+
+// 重构新增：Zero TimeStamp 周期和 Seed
+static const UInt32 kZeroTimeStampPeriod = 512; // 512 帧短周期
+static atomic_uint_fast64_t gZTS_Seed = 1; // 原子 Seed，用于强制 Host 重收敛
 
 // [修复] Loopback 缓冲区 - 用于输入操作读取输出数据
 static Float32 gLoopbackBuffer[16384];
@@ -184,8 +187,11 @@ static OSStatus VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef __unused i
     pthread_mutex_lock(&gPlugIn_StateMutex);
     if (gDevice_IOIsRunning == 0)
     {
+        // 重置时间戳计数并设置新的 Anchor 时间
         gDevice_NumberTimeStamps = 0;
         gDevice_AnchorHostTime = mach_absolute_time();
+        // 自增 Seed 强制 Host 重新收敛时钟
+        atomic_fetch_add(&gZTS_Seed, 1);
     }
     gDevice_IOIsRunning++;
     pthread_mutex_unlock(&gPlugIn_StateMutex);
@@ -204,66 +210,41 @@ static OSStatus VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef __unused in
     return 0;
 }
 
-// [时钟策略 - Clock Strategy]
+// [重构时钟策略 - Refactored Clock Strategy]
 //
-// 当前配置：物理设备作为 Master Clock (见 aggregate_device_manager.c 第 279 行)
-// CFDictionarySetValue(desc, CFSTR("master"), pUIDRef);
+// 周期从 16384 帧改为 512 帧，消除"慢放感"
+// 基于 mach_absolute_time() 的单调推导，不再依赖缓冲区计数
+// gZTS_Seed 在 Start/Stop/Underrun/Overrun 时自增，强制 Host 重新收敛
 //
-// 这意味着：
-//   - 虚拟设备作为从设备 (Slave)，跟随物理设备的时钟
-//   - 物理设备提供稳定的硬件时钟基准
-//   - 虚拟设备应用漂移补偿 (drift correction) 来同步
-//
-// 本函数生成虚拟时钟时间戳，仅用于：
-//   1. 驱动自身的缓冲区管理
-//   2. 当虚拟设备作为独立设备使用时的时钟源
-//
-// 性能优化：
-//   - 使用局部变量计算，减少内存访问
-//   - while 循环限制最大迭代次数（防止 CPU 峰值）
-//   - 标量读取无需锁保护
+// 技术规格：
+//   - 周期: 512 帧 (约 10.67ms @ 48kHz)
+//   - 格式: Non-Interleaved Float32, 2ch
+//   - 时钟源: mach_absolute_time() 转换为音频采样时间
+
 static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef __unused inDriver,
                                                     AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID,
-                                                    Float64* outSampleTime, UInt64* outHostTime,
-                                                    UInt64* __unused outSeed)
+                                                    Float64* outSampleTime, UInt64* outHostTime, UInt64* outSeed)
 {
-    // 获取当前时间
+    // 获取当前 mach 时间并转换为音频采样时间
     UInt64 now = mach_absolute_time();
 
-    // 计算每个缓冲区的时间戳数
-    const Float64 ticksPerBuf = gDevice_HostTicksPerFrame * (Float64)kDevice_RingBufferSize;
-    const UInt64 anchorHostTime = gDevice_AnchorHostTime;
+    // 计算从 Anchor 时间开始的采样数
+    // 使用 gDevice_HostTicksPerFrame 将主机时钟滴答转换为采样帧数
+    UInt64 elapsedTicks = now - gDevice_AnchorHostTime;
+    Float64 elapsedFrames = (Float64)elapsedTicks / gDevice_HostTicksPerFrame;
 
-    // 局部变量计算，减少内存访问
-    UInt64 localNumberTimeStamps = gDevice_NumberTimeStamps;
-    const Float64 currentTargetTime = (Float64)anchorHostTime + (Float64)(localNumberTimeStamps + 1) * ticksPerBuf;
+    // 计算周期数 (每 512 帧一个周期)
+    UInt64 periodCount = (UInt64)(elapsedFrames / (Float64)kZeroTimeStampPeriod);
 
-    // 计算需要前进多少缓冲区
-    if (currentTargetTime <= (Float64)now)
-    {
-        // 计算可以前进的缓冲区数量，限制最大迭代次数
-        const Float64 diff = (Float64)now - (Float64)anchorHostTime;
-        const UInt64 targetBuffers = (UInt64)(diff / ticksPerBuf);
+    // 计算采样时间：周期数 * 周期大小
+    *outSampleTime = (Float64)periodCount * (Float64)kZeroTimeStampPeriod;
 
-        // 限制单次前进的最大缓冲区数（防止长时间阻塞）
-        const UInt64 maxAdvance = 1000;
-        if (targetBuffers > localNumberTimeStamps + maxAdvance)
-        {
-            localNumberTimeStamps = targetBuffers - maxAdvance;
-        }
-        else if (targetBuffers > localNumberTimeStamps)
-        {
-            localNumberTimeStamps = targetBuffers;
-        }
-    }
+    // 计算对应的主机时间
+    *outHostTime =
+        gDevice_AnchorHostTime + (UInt64)((Float64)(periodCount * kZeroTimeStampPeriod) * gDevice_HostTicksPerFrame);
 
-    // 写回全局变量
-    gDevice_NumberTimeStamps = localNumberTimeStamps;
-
-    // 计算输出时间戳
-    *outSampleTime = (Float64)localNumberTimeStamps * (Float64)kDevice_RingBufferSize;
-    *outHostTime = anchorHostTime + (UInt64)((Float64)localNumberTimeStamps * ticksPerBuf);
-    *outSeed = 1;
+    // 返回原子 Seed
+    *outSeed = atomic_load(&gZTS_Seed);
 
     return 0;
 }
@@ -448,7 +429,7 @@ static OSStatus VirtualAudioDriver_GetPropertyDataSize(AudioServerPlugInDriverRe
     }
     else if (inObjectID == kObjectID_Device && inAddress->mSelector == kAudioDevicePropertyStreamConfiguration)
     {
-        *outDataSize = sizeof(AudioBufferList) + sizeof(AudioBuffer); // 一个缓冲区
+        *outDataSize = sizeof(AudioBufferList) + sizeof(AudioBuffer) * 2; // Non-Interleaved: 2个缓冲区（每个声道一个）
     }
     else if (inObjectID == kObjectID_PlugIn && inAddress->mSelector == kAudioPlugInPropertyDeviceList)
     {
@@ -547,11 +528,17 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
             break;
         case kAudioDevicePropertyStreamConfiguration:
             {
+                // 修改：Non-Interleaved 格式下，每个声道一个独立的缓冲区
                 AudioBufferList* list = (AudioBufferList*)outData;
-                list->mNumberBuffers = 1;
-                list->mBuffers[0].mNumberChannels = 2;
-                list->mBuffers[0].mDataByteSize = 512 * 2 * sizeof(Float32);
-                list->mBuffers[0].mData = NULL;
+                list->mNumberBuffers = 2; // 2个声道，每个声道一个缓冲区
+                for (UInt32 i = 0; i < 2; i++)
+                {
+                    // 使用指针访问以避免固定大小数组越界警告
+                    AudioBuffer* buffer = (AudioBuffer*)((uint8_t*)&list->mBuffers[0] + (i * sizeof(AudioBuffer)));
+                    buffer->mNumberChannels = 1; // 每个缓冲区只有一个声道
+                    buffer->mDataByteSize = 512 * sizeof(Float32); // 每帧4字节
+                    buffer->mData = NULL;
+                }
                 *outDataSize = sizeof(AudioBufferList) + sizeof(AudioBuffer);
             }
             break;
@@ -575,10 +562,9 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
             *outDataSize = sizeof(UInt32);
             break;
         case kAudioDevicePropertyZeroTimeStampPeriod:
-            // 零时间戳周期：决定系统回调频率的稳定性
-            // 使用 RingBuffer 大小 16384 / 48000Hz ≈ 341ms
-            // 使用 1024 帧作为一个周期
-            *((UInt32*)outData) = kDevice_RingBufferSize;
+            // 零时间戳周期：改为 512 帧短周期 (约 10.67ms @ 48kHz)
+            // 消除音频"慢放感"，提高实时响应性
+            *((UInt32*)outData) = kZeroTimeStampPeriod;
             *outDataSize = sizeof(UInt32);
             break;
         case kAudioDevicePropertyIcon:
@@ -666,15 +652,17 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
             break;
         case kAudioStreamPropertyVirtualFormat:
         case kAudioStreamPropertyPhysicalFormat:
-            // 设置音频格式：48kHz, 32-bit Float, 2 channels
+            // 设置音频格式：48kHz, 32-bit Float, 2 channels, Non-Interleaved
+            // 修改：从 Interleaved 改为 Non-Interleaved (Planar)，消除"慢放感"
             {
                 AudioStreamBasicDescription* format = (AudioStreamBasicDescription*)outData;
                 format->mSampleRate = 48000.0;
                 format->mFormatID = kAudioFormatLinearPCM;
-                format->mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-                format->mBytesPerPacket = 8;
+                format->mFormatFlags =
+                    kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+                format->mBytesPerPacket = 4;
                 format->mFramesPerPacket = 1;
-                format->mBytesPerFrame = 8;
+                format->mBytesPerFrame = 4;
                 format->mChannelsPerFrame = 2;
                 format->mBitsPerChannel = 32;
                 format->mReserved = 0;
@@ -687,10 +675,11 @@ static OSStatus VirtualAudioDriver_GetPropertyData(AudioServerPlugInDriverRef __
                 AudioStreamRangedDescription* format = (AudioStreamRangedDescription*)outData;
                 format->mFormat.mSampleRate = 48000.0;
                 format->mFormat.mFormatID = kAudioFormatLinearPCM;
-                format->mFormat.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-                format->mFormat.mBytesPerPacket = 8;
+                format->mFormat.mFormatFlags =
+                    kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
+                format->mFormat.mBytesPerPacket = 4;
                 format->mFormat.mFramesPerPacket = 1;
-                format->mFormat.mBytesPerFrame = 8;
+                format->mFormat.mBytesPerFrame = 4;
                 format->mFormat.mChannelsPerFrame = 2;
                 format->mFormat.mBitsPerChannel = 32;
                 format->mFormat.mReserved = 0;
