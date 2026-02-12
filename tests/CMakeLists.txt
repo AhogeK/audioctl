@@ -25,6 +25,7 @@ target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_server.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_client.c
         ${CMAKE_SOURCE_DIR}/src/constants.c
+        ${CMAKE_SOURCE_DIR}/src/audio_apps.m
 )
 
 # 添加包含目录

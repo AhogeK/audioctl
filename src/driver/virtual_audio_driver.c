@@ -204,7 +204,20 @@ static OSStatus VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef __unused in
 {
     pthread_mutex_lock(&gPlugIn_StateMutex);
     if (gDevice_IOIsRunning > 0)
+    {
         gDevice_IOIsRunning--;
+        // 【修复】当最后一个客户端停止时，重置 ring buffer
+        if (gDevice_IOIsRunning == 0)
+        {
+            // 清零读写指针
+            atomic_store(&gLoopbackWritePos, 0);
+            atomic_store(&gLoopbackReadPos, 0);
+            // 清零缓冲区（防止下次启动读到垃圾数据）
+            memset(gLoopbackBuffer, 0, sizeof(gLoopbackBuffer));
+            // 自增 Seed 强制 Host 重新收敛
+            atomic_fetch_add(&gZTS_Seed, 1);
+        }
+    }
     pthread_mutex_unlock(&gPlugIn_StateMutex);
 
     return 0;
@@ -254,13 +267,23 @@ static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef 
                                                      UInt32 __unused inClientID, UInt32 inOperationID,
                                                      Boolean* outWillDo, Boolean* outWillDoInPlace)
 {
-    // 支持读写操作（双工设备）
-    // 输入操作：用于 IOProc 录制（loopback）
-    // 输出操作：用于音量控制和音频输出
-    bool ok = (inOperationID == kAudioServerPlugInIOOperationReadInput ||
-               inOperationID == kAudioServerPlugInIOOperationWriteMix ||
-               inOperationID == kAudioServerPlugInIOOperationProcessOutput ||
-               inOperationID == kAudioServerPlugInIOOperationProcessMix);
+    // 【修复】只启用必要的操作，避免 MixOutput 短路 WriteMix
+    // ProcessOutput: per-client gain (per-app volume)
+    // WriteMix: write to loopback ring (once per cycle)
+    // ReadInput: read from loopback ring
+    // ⚠️ 不要启用 ProcessMix/MixOutput，否则 WriteMix 不会被调用，导致无声
+    bool ok = false;
+    switch (inOperationID)
+    {
+    case kAudioServerPlugInIOOperationProcessOutput:
+    case kAudioServerPlugInIOOperationWriteMix:
+    case kAudioServerPlugInIOOperationReadInput:
+        ok = true;
+        break;
+    default:
+        ok = false;
+        break;
+    }
     if (outWillDo)
         *outWillDo = ok;
     if (outWillDoInPlace)
@@ -268,22 +291,38 @@ static OSStatus VirtualAudioDriver_WillDoIOOperation(AudioServerPlugInDriverRef 
     return 0;
 }
 
-// ABL 布局验证：Non-Interleaved 格式下应为双缓冲区
-static inline int validate_abl_noninterleaved(const AudioBufferList* abl, UInt32 ch, UInt32 frames)
+// 【修复】ABL 稳健校验：返回实际可安全读写的帧数，0 表示布局错误
+static inline UInt32 abl_ni_clamp_frames(const AudioBufferList* abl, UInt32 ch, UInt32 frames)
 {
     if (abl->mNumberBuffers != ch)
         return 0;
+
+    UInt32 minFrames = frames;
     for (UInt32 b = 0; b < ch; b++)
     {
         const AudioBuffer* buffer = (const AudioBuffer*)((const uint8_t*)&abl->mBuffers[0] + (b * sizeof(AudioBuffer)));
-        if (buffer->mNumberChannels != 1)
+        if (buffer->mNumberChannels != 1 || !buffer->mData)
             return 0;
-        if (!buffer->mData)
-            return 0;
-        if (buffer->mDataByteSize < frames * sizeof(Float32))
-            return 0;
+
+        UInt32 maxFrames = (UInt32)(buffer->mDataByteSize / sizeof(Float32));
+        if (maxFrames < minFrames)
+            minFrames = maxFrames;
     }
-    return 1;
+    return minFrames;
+}
+
+// 【修复】ABL 清零：将缓冲区置零（用于布局错误时输出静音）
+static inline void abl_ni_zero(AudioBufferList* abl, UInt32 ch, UInt32 frames)
+{
+    UInt32 useCh = (abl->mNumberBuffers < ch) ? abl->mNumberBuffers : ch;
+    for (UInt32 b = 0; b < useCh; b++)
+    {
+        AudioBuffer* buffer = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0] + (b * sizeof(AudioBuffer)));
+        if (buffer->mData && buffer->mDataByteSize >= frames * sizeof(Float32))
+        {
+            memset(buffer->mData, 0, frames * sizeof(Float32));
+        }
+    }
 }
 
 // 错误布局计数器（原子，用于调试）
@@ -301,20 +340,14 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
     if (!ioMainBuffer || inIOBufferFrameSize == 0)
         return 0;
 
-    // 验证 ABL 布局（Non-Interleaved 应为双缓冲区）
+    // 【修复】验证 ABL 布局并获取安全帧数
     AudioBufferList* abl = (AudioBufferList*)ioMainBuffer;
-    if (!validate_abl_noninterleaved(abl, 2, inIOBufferFrameSize))
+    UInt32 frames = abl_ni_clamp_frames(abl, 2, inIOBufferFrameSize);
+    if (frames == 0)
     {
+        // 布局错误或缓冲区太小，输出静音
         note_bad_abl();
-        // 布局错误，清空数据防止杂音
-        for (UInt32 b = 0; b < abl->mNumberBuffers; b++)
-        {
-            AudioBuffer* buf = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0] + (b * sizeof(AudioBuffer)));
-            if (buf->mData)
-            {
-                memset(buf->mData, 0, buf->mDataByteSize);
-            }
-        }
+        abl_ni_zero(abl, 2, inIOBufferFrameSize);
         return 0;
     }
 
@@ -322,7 +355,6 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
     AudioBuffer* rightBuffer = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0] + sizeof(AudioBuffer));
     Float32* leftChannel = (Float32*)leftBuffer->mData;
     Float32* rightChannel = (Float32*)rightBuffer->mData;
-    UInt32 frames = inIOBufferFrameSize;
 
     // 处理输出操作：应用音量控制并存储到 loopback 缓冲区
     if (inOperationID == kAudioServerPlugInIOOperationProcessOutput)

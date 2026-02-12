@@ -7,9 +7,55 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "aggregate_device_manager.h"
 #include "audio_control.h"
 #include "ipc/ipc_protocol.h"
+
+#pragma mark - 设备状态持久化
+
+// 保存/恢复设备状态文件路径
+static const char* kDeviceStatePath = "/Users/ahogek/Library/Application Support/audioctl/last_device.txt";
+
+// 保存当前默认输出设备到文件
+static OSStatus save_current_device(AudioDeviceID deviceId)
+{
+    // 确保目录存在
+    char dirPath[PATH_MAX];
+    snprintf(dirPath, sizeof(dirPath), "/Users/%s/Library/Application Support/audioctl", getlogin());
+    mkdir(dirPath, 0755);
+
+    FILE* fp = fopen(kDeviceStatePath, "w");
+    if (!fp)
+    {
+        fprintf(stderr, "⚠️ 无法创建设备状态文件: %s\n", kDeviceStatePath);
+        return -1;
+    }
+
+    fprintf(fp, "%u", deviceId);
+    fclose(fp);
+    return noErr;
+}
+
+// 从文件恢复之前的设备
+static AudioDeviceID restore_previous_device(void)
+{
+    FILE* fp = fopen(kDeviceStatePath, "r");
+    if (!fp)
+    {
+        return kAudioObjectUnknown;
+    }
+
+    unsigned int deviceId = kAudioObjectUnknown;
+    char buf[32];
+    if (fgets(buf, sizeof(buf), fp))
+    {
+        deviceId = (unsigned int)strtoul(buf, NULL, 10);
+    }
+    fclose(fp);
+
+    return deviceId;
+}
 
 #pragma mark - 内部辅助函数
 
@@ -299,6 +345,14 @@ OSStatus virtual_device_activate(void)
 // App -> Virtual Device -> Router -> Physical Device
 OSStatus virtual_device_activate_with_router(void)
 {
+    // 0. 【修复】保存当前默认设备，以便后续恢复
+    AudioDeviceID previousDevice = get_default_output_device();
+    if (previousDevice != kAudioObjectUnknown)
+    {
+        save_current_device(previousDevice);
+        printf("💾 已保存当前设备 ID=%d，供后续恢复\n", previousDevice);
+    }
+
     // 1. 【修复】使用 UID 查找虚拟设备，而不是硬编码 ID
     // CoreAudio 重启后设备 ID 会重新分配
     AudioDeviceID virtualDevice = kAudioObjectUnknown;
@@ -399,7 +453,40 @@ OSStatus virtual_device_activate_with_router(void)
 
 OSStatus virtual_device_deactivate(void)
 {
-    // 查找第一个非虚拟设备并设为默认
+    // 【修复】首先尝试恢复之前保存的设备
+    AudioDeviceID previousDevice = restore_previous_device();
+    if (previousDevice != kAudioObjectUnknown)
+    {
+        // 验证设备是否仍然有效
+        char uid[256] = {0};
+        OSStatus verifyStatus = get_device_uid(previousDevice, uid, sizeof(uid));
+        if (verifyStatus == noErr && strstr(uid, VIRTUAL_DEVICE_UID) == NULL && strstr(uid, "Virtual") == NULL)
+        {
+            // 设备有效且不是虚拟设备，恢复到该设备
+            AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultOutputDevice,
+                                                          kAudioObjectPropertyScopeGlobal,
+                                                          kAudioObjectPropertyElementMain};
+
+            OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL,
+                                                         sizeof(AudioDeviceID), &previousDevice);
+
+            if (status == noErr)
+            {
+                printf("✅ 已恢复到之前的设备 (ID=%d, UID=%s)\n", previousDevice, uid);
+                return noErr;
+            }
+            else
+            {
+                fprintf(stderr, "⚠️  恢复之前的设备失败: %d，将尝试查找其他物理设备\n", status);
+            }
+        }
+        else
+        {
+            printf("⚠️  之前保存的设备已失效或不可用，将尝试查找其他物理设备\n");
+        }
+    }
+
+    // 回退方案：查找第一个非虚拟设备并设为默认
     AudioDeviceID* devices = NULL;
     UInt32 count = 0;
 
@@ -449,7 +536,7 @@ OSStatus virtual_device_deactivate(void)
 
     if (status == noErr)
     {
-        printf("已恢复到物理音频设备\n");
+        printf("已恢复到物理音频设备 (回退方案)\n");
     }
 
     return status;
