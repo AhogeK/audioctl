@@ -161,10 +161,12 @@ static void init_daemon(void)
 // 运行守护进程
 _Noreturn void run_daemon(void)
 {
-    // 在 init_daemon() 之前写入 PID，因为 init_daemon() 会关闭所有文件描述符
-    write_pid_file(getpid());
-
+    // 【关键修复】先初始化 daemon（fork 并关闭文件描述符）
     init_daemon();
+
+    // 【关键修复】在 init_daemon() 之后写入 PID
+    // 此时我们已经是最终的守护进程（孙子进程）
+    write_pid_file(getpid());
 
     write_log("守护进程启动");
 

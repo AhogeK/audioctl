@@ -349,17 +349,39 @@ coreaudio_kickstart_once() {
     return 0
   fi
 
-  # [新增] 重启前系统健康检查
+  # [新增] 重启前系统健康检查 - 基于 per-core 负载和 coreaudiod 实际 CPU
+  local cpu_cores
+  cpu_cores="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
   local load_avg
   load_avg="$(uptime | awk -F'load averages:' '{print $2}' | awk '{print $1}' | tr -d ',')" || true
-  if [[ -n "${load_avg}" ]]; then
-    # 移除可能的小数点进行比较
-    local load_int
-    load_int="${load_avg%.*}"
-    if [[ "${load_int}" -gt 5 ]]; then
-      log_error "系统负载过高 (${load_avg})，禁止重启 CoreAudio"
-      log_error "请等待系统负载恢复正常后再试"
+
+  if [[ -n "${load_avg}" && -n "${cpu_cores}" && "${cpu_cores}" -gt 0 ]]; then
+    # 计算 per-core 负载
+    local per_core_load
+    per_core_load="$(echo "scale=2; ${load_avg} / ${cpu_cores}" | bc 2>/dev/null || echo "0")"
+
+    # 检查 coreaudiod 实际 CPU 使用率（如果正在运行）
+    local coreaudio_cpu
+    coreaudio_cpu="$(ps aux | grep -E '^_coreaudiod|coreaudiod$' | grep -v grep | awk '{print $3}' | head -1)"
+    coreaudio_cpu="${coreaudio_cpu:-0}"
+
+    log_info "系统状态: ${cpu_cores}核, 总负载=${load_avg}, 每核负载=${per_core_load}, coreaudiod=${coreaudio_cpu}%"
+
+    # 关键检查：如果 coreaudiod 本身 CPU 很高(>50%)，说明驱动有问题
+    if [[ "${coreaudio_cpu%.*}" -gt 50 ]]; then
+      log_error "⚠️  coreaudiod CPU 使用率过高 (${coreaudio_cpu}%)"
+      log_error "这通常表示驱动初始化失败或进入死循环"
+      log_error "建议立即卸载驱动: sudo rm -rf /Library/Audio/Plug-Ins/HAL/VirtualAudioDriver.driver"
       return 1
+    fi
+
+    # 宽松检查：per-core 负载 > 3 才警告，> 5 才禁止
+    local load_int
+    load_int="${per_core_load%.*}"
+    if [[ "${load_int}" -gt 5 ]]; then
+      log_warn "系统 per-core 负载较高 (${per_core_load})，但 coreaudiod 正常"
+      log_warn "继续安装（多核系统正常负载）..."
     fi
   fi
 
@@ -480,20 +502,26 @@ install_driver_bundle() {
   if wait_coreaudiod 20; then
     log_success "CoreAudio 已启动"
 
-    # [新增] 等待后检查系统负载
+    # [新增] 等待后检查 coreaudiod CPU 使用率（更准确的指标）
     sleep 3
-    local post_load
-    post_load="$(uptime | awk -F'load averages:' '{print $2}' | awk '{print $1}' | tr -d ',')" || true
-    if [[ -n "${post_load}" ]]; then
-      local post_int="${post_load%.*}"
-      if [[ "${post_int}" -gt 10 ]]; then
-        log_error "⚠️  CoreAudio 启动后系统负载过高 (${post_load})"
-        log_error "这通常表示驱动初始化失败或进入死循环"
-        log_error "建议立即运行: sudo launchctl kickstart -k system/com.apple.audio.coreaudiod"
-        return 1
-      fi
+    local cpu_cores
+    cpu_cores="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+    local coreaudio_cpu
+    coreaudio_cpu="$(ps aux | grep -E '^_coreaudiod|coreaudiod$' | grep -v grep | awk '{print $3}' | head -1)"
+    coreaudio_cpu="${coreaudio_cpu:-0}"
+
+    # 检查 coreaudiod CPU - 如果 >100% 说明死循环
+    if [[ "${coreaudio_cpu%.*}" -gt 100 ]]; then
+      log_error "⚠️  coreaudiod CPU 使用率过高 (${coreaudio_cpu}%)"
+      log_error "驱动可能进入死循环，正在自动卸载..."
+      sudo /bin/rm -rf "${DRIVER_DST}"
+      sudo /bin/killall -9 coreaudiod 2>/dev/null || true
+      log_error "驱动已卸载，CoreAudio 已重启"
+      return 1
     fi
-    log_success "CoreAudio 运行正常"
+
+    log_success "CoreAudio 运行正常 (CPU: ${coreaudio_cpu}%)"
+    log_info "你可以运行: ./cmake-build-debug/bin/audioctl virtual-status 检查设备状态"
   else
     log_warn "CoreAudio 未在预期时间内启动"
   fi

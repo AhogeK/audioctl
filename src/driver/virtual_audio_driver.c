@@ -1,5 +1,6 @@
 #include "driver/virtual_audio_driver.h"
 #include <mach/mach_time.h>
+#include <math.h>
 #include <os/log.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -18,10 +19,11 @@ static pthread_mutex_t gPlugIn_StateMutex = PTHREAD_MUTEX_INITIALIZER;
 static UInt32 gPlugIn_RefCount = 0;
 static AudioServerPlugInHostRef gPlugIn_Host = NULL;
 static Float64 gDevice_SampleRate = 48000.0;
-static UInt64 gDevice_IOIsRunning = 0;
+// 【关键修复】使用原子变量避免实时线程中的互斥锁
+static _Atomic UInt64 gDevice_IOIsRunning = 0;
 static Float64 gDevice_HostTicksPerFrame = 0.0;
-static UInt64 gDevice_NumberTimeStamps = 0;
-static UInt64 gDevice_AnchorHostTime = 0;
+static _Atomic UInt64 gDevice_NumberTimeStamps = 0;
+static _Atomic UInt64 gDevice_AnchorHostTime = 0;
 
 // 重构新增：Zero TimeStamp 周期和 Seed
 static const UInt32 kZeroTimeStampPeriod = 512; // 512 帧短周期
@@ -175,50 +177,53 @@ static OSStatus VirtualAudioDriver_Initialize(AudioServerPlugInDriverRef __unuse
     return 0;
 }
 
+// 【关键修复】StartIO - 使用原子操作避免实时线程中的互斥锁
+// 实时音频线程中严禁使用 mutex，会导致优先级反转和音频卡顿
 static OSStatus VirtualAudioDriver_StartIO(AudioServerPlugInDriverRef __unused inDriver, AudioObjectID inDeviceObjectID,
                                            UInt32 __unused inClientID)
 {
     // 验证设备 ID 是否正确
     if (inDeviceObjectID != kObjectID_Device)
     {
-        return kAudioHardwareBadObjectError;
+        return -1; // 通用错误码
     }
 
-    pthread_mutex_lock(&gPlugIn_StateMutex);
-    if (gDevice_IOIsRunning == 0)
+    // 【修复】使用原子操作替代互斥锁
+    // 先读取当前计数，检查是否为 0
+    UInt64 prevCount = atomic_fetch_add_explicit(&gDevice_IOIsRunning, 1, memory_order_acq_rel);
+
+    if (prevCount == 0)
     {
-        // 重置时间戳计数并设置新的 Anchor 时间
-        gDevice_NumberTimeStamps = 0;
-        gDevice_AnchorHostTime = mach_absolute_time();
+        // 第一个客户端启动，重置时间戳计数并设置新的 Anchor 时间
+        atomic_store_explicit(&gDevice_NumberTimeStamps, 0, memory_order_release);
+        atomic_store_explicit(&gDevice_AnchorHostTime, mach_absolute_time(), memory_order_release);
         // 自增 Seed 强制 Host 重新收敛时钟
-        atomic_fetch_add(&gZTS_Seed, 1);
+        atomic_fetch_add_explicit(&gZTS_Seed, 1, memory_order_release);
     }
-    gDevice_IOIsRunning++;
-    pthread_mutex_unlock(&gPlugIn_StateMutex);
 
     return 0;
 }
 
+// 【关键修复】StopIO - 使用原子操作避免实时线程中的互斥锁
+// 注意：此函数可能在非实时上下文中调用，但仍需避免锁以保证响应性
 static OSStatus VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef __unused inDriver,
                                           AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID)
 {
-    pthread_mutex_lock(&gPlugIn_StateMutex);
-    if (gDevice_IOIsRunning > 0)
+    // 【修复】使用原子操作替代互斥锁
+    // fetch_sub 返回的是递减前的值
+    UInt64 prevCount = atomic_fetch_sub_explicit(&gDevice_IOIsRunning, 1, memory_order_acq_rel);
+
+    if (prevCount == 1)
     {
-        gDevice_IOIsRunning--;
-        // 【修复】当最后一个客户端停止时，重置 ring buffer
-        if (gDevice_IOIsRunning == 0)
-        {
-            // 清零读写指针
-            atomic_store(&gLoopbackWritePos, 0);
-            atomic_store(&gLoopbackReadPos, 0);
-            // 清零缓冲区（防止下次启动读到垃圾数据）
-            memset(gLoopbackBuffer, 0, sizeof(gLoopbackBuffer));
-            // 自增 Seed 强制 Host 重新收敛
-            atomic_fetch_add(&gZTS_Seed, 1);
-        }
+        // 最后一个客户端停止，重置 ring buffer
+        atomic_store_explicit(&gLoopbackWritePos, 0, memory_order_relaxed);
+        atomic_store_explicit(&gLoopbackReadPos, 0, memory_order_relaxed);
+        // 清零缓冲区（防止下次启动读到垃圾数据）
+        // 注意：memset 不是原子操作，但此时所有 IO 都已停止，是安全的
+        memset(gLoopbackBuffer, 0, sizeof(gLoopbackBuffer));
+        // 自增 Seed 强制 Host 重新收敛
+        atomic_fetch_add_explicit(&gZTS_Seed, 1, memory_order_release);
     }
-    pthread_mutex_unlock(&gPlugIn_StateMutex);
 
     return 0;
 }
@@ -234,27 +239,92 @@ static OSStatus VirtualAudioDriver_StopIO(AudioServerPlugInDriverRef __unused in
 //   - 格式: Non-Interleaved Float32, 2ch
 //   - 时钟源: mach_absolute_time() 转换为音频采样时间
 
+// 【关键修复】安全的 GetZeroTimeStamp 实现，防止 CPU 卡死
+// 修复内容：
+// 1. 防止除零：检查 gDevice_HostTicksPerFrame 是否为 0
+// 2. 防止时间回绕：检查 AnchorTime 是否已初始化
+// 3. 防止 Inf/NaN：验证计算结果有效性
 static OSStatus VirtualAudioDriver_GetZeroTimeStamp(AudioServerPlugInDriverRef __unused inDriver,
                                                     AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID,
                                                     Float64* outSampleTime, UInt64* outHostTime, UInt64* outSeed)
 {
-    // 获取当前 mach 时间并转换为音频采样时间
+    // 【修复】检查输出指针
+    if (outSampleTime == NULL || outHostTime == NULL || outSeed == NULL)
+    {
+        return -1; // 通用错误
+    }
+
+    // 【修复】防止除零：如果 HostTicksPerFrame 未初始化，使用默认值
+    // 默认值基于 48kHz 和纳秒时钟
+    Float64 hostTicksPerFrame = gDevice_HostTicksPerFrame;
+    if (hostTicksPerFrame <= 0.0)
+    {
+        // 安全默认值：假设 1 tick = 1 ns @ 48kHz
+        hostTicksPerFrame = 1000000000.0 / 48000.0;
+    }
+
+    // 【修复】防止时间回绕：检查 AnchorTime 是否已初始化
+    UInt64 anchorTime = gDevice_AnchorHostTime;
+    if (anchorTime == 0)
+    {
+        // 未初始化，使用当前时间作为锚点
+        anchorTime = mach_absolute_time();
+        gDevice_AnchorHostTime = anchorTime;
+    }
+
+    // 获取当前 mach 时间
     UInt64 now = mach_absolute_time();
 
-    // 计算从 Anchor 时间开始的采样数
-    // 使用 gDevice_HostTicksPerFrame 将主机时钟滴答转换为采样帧数
-    UInt64 elapsedTicks = now - gDevice_AnchorHostTime;
-    Float64 elapsedFrames = (Float64)elapsedTicks / gDevice_HostTicksPerFrame;
+    // 【修复】防止时间回绕：如果 now < anchor，说明时钟异常
+    UInt64 elapsedTicks;
+    if (now >= anchorTime)
+    {
+        elapsedTicks = now - anchorTime;
+    }
+    else
+    {
+        // 时钟回绕或异常，重置锚点
+        anchorTime = now;
+        gDevice_AnchorHostTime = anchorTime;
+        elapsedTicks = 0;
+    }
+
+    // 计算经过的帧数
+    Float64 elapsedFrames = (Float64)elapsedTicks / hostTicksPerFrame;
+
+    // 【修复】防止 Inf/NaN：检查结果有效性
+    if (!isfinite(elapsedFrames) || elapsedFrames < 0.0)
+    {
+        elapsedFrames = 0.0;
+    }
 
     // 计算周期数 (每 512 帧一个周期)
     UInt64 periodCount = (UInt64)(elapsedFrames / (Float64)kZeroTimeStampPeriod);
 
     // 计算采样时间：周期数 * 周期大小
-    *outSampleTime = (Float64)periodCount * (Float64)kZeroTimeStampPeriod;
+    Float64 sampleTime = (Float64)periodCount * (Float64)kZeroTimeStampPeriod;
+
+    // 【修复】防止 Inf/NaN
+    if (!isfinite(sampleTime) || sampleTime < 0.0)
+    {
+        sampleTime = 0.0;
+        periodCount = 0;
+    }
+
+    *outSampleTime = sampleTime;
 
     // 计算对应的主机时间
-    *outHostTime =
-        gDevice_AnchorHostTime + (UInt64)((Float64)(periodCount * kZeroTimeStampPeriod) * gDevice_HostTicksPerFrame);
+    Float64 hostTimeFloat = (Float64)anchorTime + (Float64)(periodCount * kZeroTimeStampPeriod) * hostTicksPerFrame;
+
+    // 【修复】防止 Inf/NaN 和溢出
+    if (!isfinite(hostTimeFloat) || hostTimeFloat < 0.0 || hostTimeFloat > (Float64)UINT64_MAX)
+    {
+        *outHostTime = anchorTime;
+    }
+    else
+    {
+        *outHostTime = (UInt64)hostTimeFloat;
+    }
 
     // 返回原子 Seed
     *outSeed = atomic_load(&gZTS_Seed);
@@ -351,8 +421,20 @@ static OSStatus VirtualAudioDriver_DoIOOperation(AudioServerPlugInDriverRef __un
         return 0;
     }
 
-    AudioBuffer* leftBuffer = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0]);
-    AudioBuffer* rightBuffer = (AudioBuffer*)((uint8_t*)&abl->mBuffers[0] + sizeof(AudioBuffer));
+    // 【关键修复】使用更安全的数组索引访问，避免指针算术
+    // 验证 mNumberBuffers 至少有2个缓冲区（由 abl_ni_clamp_frames 检查）
+    AudioBuffer* leftBuffer = &abl->mBuffers[0];
+    AudioBuffer* rightBuffer = &abl->mBuffers[1];
+
+    // 【关键修复】验证缓冲区数据指针非空
+    if (leftBuffer->mData == NULL || rightBuffer->mData == NULL)
+    {
+        // 数据指针为空，输出静音
+        note_bad_abl();
+        abl_ni_zero(abl, 2, inIOBufferFrameSize);
+        return 0;
+    }
+
     Float32* leftChannel = (Float32*)leftBuffer->mData;
     Float32* rightChannel = (Float32*)rightBuffer->mData;
 

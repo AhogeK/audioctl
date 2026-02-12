@@ -7,7 +7,11 @@
 #include "driver/app_volume_driver.h"
 #include <os/lock.h>
 #include <stdatomic.h>
+#include <sys/time.h>
 #include "ipc/ipc_client.h"
+
+// 【修复】定义缓存有效期（ms），与 ipc_client.c 保持一致
+#define IPC_CACHE_TTL_MS 100
 
 // 客户端条目结构
 typedef struct
@@ -32,6 +36,14 @@ static bool g_ipcInitialized = false;
 // 本地音量表（作为 IPC 的缓存）
 static AppVolumeTable g_volumeTable = {0};
 static os_unfair_lock g_tableLock = OS_UNFAIR_LOCK_INIT;
+
+// 【关键修复】实时音频路径使用的时间戳函数
+static uint64_t get_timestamp_ms(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
 
 #pragma mark - Initialization and Cleanup
 
@@ -242,19 +254,30 @@ OSStatus app_volume_driver_get_client_pids(pid_t* outPids, UInt32 maxCount, UInt
 
 #pragma mark - 音量应用
 
+// 【关键修复】实时音频路径专用：永不阻塞，只使用缓存
+// 注意：此函数在实时音频线程（IOProc）中被调用，严禁任何阻塞操作
 Float32 app_volume_driver_get_volume(UInt32 clientID, bool* outIsMuted)
 {
-    Float32 volume = 1.0f;
+    Float32 volume = 1.0f; // 默认音量
     bool isMuted = false;
 
     // 1. 获取 PID (TryLock)
     pid_t pid = app_volume_driver_get_pid(clientID);
 
-    // 2. 如果找到了 PID，使用 IPC 客户端快速查询（带缓存）
+    // 2. 【关键修复】实时路径只读取缓存，永不触发同步IPC
+    // 缓存过期时直接使用默认值，避免阻塞音频线程
     if (pid > 0 && g_ipcInitialized)
     {
-        // 使用快速查询，非阻塞，优先使用缓存
-        ipc_client_get_volume_fast(&g_ipcClient, pid, &volume, &isMuted);
+        // 只检查缓存，不触发更新
+        uint64_t now = get_timestamp_ms();
+        if (g_ipcClient.cache_valid && g_ipcClient.cached_pid == pid &&
+            (now - g_ipcClient.cache_timestamp) < IPC_CACHE_TTL_MS)
+        {
+            volume = g_ipcClient.cached_volume;
+            isMuted = g_ipcClient.cached_muted;
+        }
+        // 缓存过期时直接使用默认值（音量=1.0），不触发IPC
+        // 缓存更新由后台线程完成
     }
 
     if (outIsMuted)

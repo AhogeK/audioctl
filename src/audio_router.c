@@ -20,7 +20,27 @@ static AudioRouterContext g_router = {0};
 
 static void rb_init(RouterRingBuffer* rb, uint32_t capacity_frames, uint32_t channels)
 {
-    rb->capacity = capacity_frames * channels;
+    // 【关键修复】防止除零：确保容量大于 0
+    if (capacity_frames == 0 || channels == 0)
+    {
+        fprintf(stderr, "[AudioRouter] Error: Invalid ring buffer params: frames=%u, ch=%u\n", capacity_frames,
+                channels);
+        rb->capacity = 0;
+        rb->buffer = NULL;
+        return;
+    }
+
+    // 【关键修复】防止乘法溢出
+    uint64_t total_size = (uint64_t)capacity_frames * (uint64_t)channels;
+    if (total_size > UINT32_MAX)
+    {
+        fprintf(stderr, "[AudioRouter] Error: Ring buffer size overflow\n");
+        rb->capacity = 0;
+        rb->buffer = NULL;
+        return;
+    }
+
+    rb->capacity = (uint32_t)total_size;
     rb->buffer = (float*)calloc(rb->capacity, sizeof(float));
     atomic_init(&rb->write_pos, 0);
     atomic_init(&rb->read_pos, 0);
@@ -38,6 +58,12 @@ static void rb_destroy(RouterRingBuffer* rb)
 // 写入数据（输入回调调用 - Producer）
 static void rb_write(RouterRingBuffer* rb, const float* data, uint32_t frame_count, uint32_t channels)
 {
+    // 【关键修复】检查缓冲区是否有效初始化
+    if (rb == NULL || rb->buffer == NULL || rb->capacity == 0 || data == NULL)
+    {
+        return;
+    }
+
     uint32_t sample_count = frame_count * channels;
     uint32_t current_write = atomic_load_explicit(&rb->write_pos, memory_order_relaxed);
     uint32_t current_read = atomic_load_explicit(&rb->read_pos, memory_order_acquire);
@@ -66,6 +92,12 @@ static void rb_write(RouterRingBuffer* rb, const float* data, uint32_t frame_cou
 // 读取数据（输出回调调用 - Consumer）
 static void rb_read(RouterRingBuffer* rb, float* data, uint32_t frame_count, uint32_t channels)
 {
+    // 【关键修复】检查缓冲区是否有效初始化
+    if (rb == NULL || rb->buffer == NULL || rb->capacity == 0 || data == NULL)
+    {
+        return;
+    }
+
     uint32_t sample_count = frame_count * channels;
     uint32_t current_read = atomic_load_explicit(&rb->read_pos, memory_order_relaxed);
     uint32_t current_write = atomic_load_explicit(&rb->write_pos, memory_order_acquire);

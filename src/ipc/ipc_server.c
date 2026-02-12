@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,8 @@ typedef struct ClientConnection
 
 static ClientConnection* g_connections = NULL;
 static IPCServerContext* g_server_ctx = NULL;
+// 【关键修复】添加互斥锁保护连接链表
+static pthread_mutex_t g_connections_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // 信号处理
 static void signal_handler(int sig)
@@ -64,8 +67,12 @@ static int add_connection(int fd, pid_t pid)
 
     conn->fd = fd;
     conn->pid = pid;
+
+    // 【关键修复】使用互斥锁保护链表操作
+    pthread_mutex_lock(&g_connections_mutex);
     conn->next = g_connections;
     g_connections = conn;
+    pthread_mutex_unlock(&g_connections_mutex);
 
     return 0;
 }
@@ -73,19 +80,30 @@ static int add_connection(int fd, pid_t pid)
 // 移除客户端连接
 static void remove_connection(int fd)
 {
+    // 【关键修复】使用互斥锁保护链表操作
+    pthread_mutex_lock(&g_connections_mutex);
     ClientConnection** current = &g_connections;
-    while (*current != NULL)
+
+    // 【关键修复】防止链表损坏导致的无限循环，设置最大迭代次数
+    int max_iterations = 10000;
+    int iterations = 0;
+
+    while (*current != NULL && iterations < max_iterations)
     {
+        iterations++;
         if ((*current)->fd == fd)
         {
             ClientConnection* to_remove = *current;
             *current = (*current)->next;
+            pthread_mutex_unlock(&g_connections_mutex); // 解锁后再关闭 fd
             close(to_remove->fd);
             free(to_remove);
             return;
         }
         current = &(*current)->next;
     }
+    
+    pthread_mutex_unlock(&g_connections_mutex);
 }
 
 // 根据 PID 查找客户端条目
@@ -653,10 +671,16 @@ void ipc_server_cleanup(IPCServerContext* ctx)
         return;
 
     // 关闭所有连接
+    // 【关键修复】使用互斥锁保护清理操作
+    pthread_mutex_lock(&g_connections_mutex);
     while (g_connections != NULL)
     {
-        remove_connection(g_connections->fd);
+        ClientConnection* to_remove = g_connections;
+        g_connections = g_connections->next;
+        close(to_remove->fd);
+        free(to_remove);
     }
+    pthread_mutex_unlock(&g_connections_mutex);
 
     // 清理所有客户端条目
     while (ctx->clients != NULL)
