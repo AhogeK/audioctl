@@ -5,16 +5,16 @@
 #include "ipc/ipc_client.h"
 #include "ipc/ipc_protocol.h"
 
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
 #include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/time.h>
-#include <math.h>
-#include <limits.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 // 配置参数
 #define IPC_CONNECT_TIMEOUT_SEC 2
@@ -22,7 +22,7 @@
 #define IPC_RECV_TIMEOUT_SEC 5
 #define IPC_RECONNECT_MAX_ATTEMPTS 5
 #define IPC_RECONNECT_BASE_DELAY_MS 100
-#define IPC_CACHE_TTL_MS 100  // 缓存有效期 100ms
+#define IPC_CACHE_TTL_MS 100 // 缓存有效期 100ms
 
 // 获取当前时间戳（毫秒）
 static uint64_t get_timestamp_ms(void)
@@ -53,7 +53,8 @@ static int set_socket_timeout(int fd, int timeout_sec)
 // 初始化客户端
 int ipc_client_init(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return -1;
+    if (ctx == NULL)
+        return -1;
 
     memset(ctx, 0, sizeof(IPCClientContext));
     ctx->fd = -1;
@@ -70,7 +71,8 @@ int ipc_client_init(IPCClientContext* ctx)
 // 连接到服务端
 int ipc_client_connect(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return -1;
+    if (ctx == NULL)
+        return -1;
 
     // 如果已连接，先断开
     if (ctx->connected)
@@ -135,7 +137,8 @@ int ipc_client_connect(IPCClientContext* ctx)
 // 断开连接
 void ipc_client_disconnect(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return;
+    if (ctx == NULL)
+        return;
 
     if (ctx->fd >= 0)
     {
@@ -148,7 +151,8 @@ void ipc_client_disconnect(IPCClientContext* ctx)
 // 清理资源
 void ipc_client_cleanup(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return;
+    if (ctx == NULL)
+        return;
 
     ipc_client_disconnect(ctx);
     memset(ctx, 0, sizeof(IPCClientContext));
@@ -160,15 +164,18 @@ void ipc_client_cleanup(IPCClientContext* ctx)
 // 检查连接状态
 bool ipc_client_is_connected(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return false;
+    if (ctx == NULL)
+        return false;
     return ctx->connected && ctx->fd >= 0;
 }
 
 // 发送消息
 int ipc_client_send(IPCClientContext* ctx, const IPCMessageHeader* header, const void* payload)
 {
-    if (ctx == NULL || header == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL || header == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     // 发送头
     ssize_t sent = send(ctx->fd, header, sizeof(IPCMessageHeader), 0);
@@ -196,8 +203,10 @@ int ipc_client_send(IPCClientContext* ctx, const IPCMessageHeader* header, const
 // 接收响应
 int ipc_client_recv(IPCClientContext* ctx, IPCMessageHeader* header, void* payload, size_t payload_size)
 {
-    if (ctx == NULL || header == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL || header == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     // 接收头
     ssize_t received = recv(ctx->fd, header, sizeof(IPCMessageHeader), 0);
@@ -240,11 +249,11 @@ int ipc_client_recv(IPCClientContext* ctx, IPCMessageHeader* header, void* paylo
 }
 
 // 同步发送请求并接收响应
-int ipc_client_send_sync(IPCClientContext* ctx,
-                         const IPCMessageHeader* request_header, const void* request_payload,
+int ipc_client_send_sync(IPCClientContext* ctx, const IPCMessageHeader* request_header, const void* request_payload,
                          IPCMessageHeader* response_header, void* response_payload, size_t response_size)
 {
-    if (ctx == NULL || request_header == NULL || response_header == NULL) return -1;
+    if (ctx == NULL || request_header == NULL || response_header == NULL)
+        return -1;
 
     // 发送请求
     if (ipc_client_send(ctx, request_header, request_payload) != 0)
@@ -264,12 +273,12 @@ int ipc_client_send_sync(IPCClientContext* ctx,
 // 快速获取音量（带缓存，非阻塞）
 int ipc_client_get_volume_fast(IPCClientContext* ctx, pid_t pid, float* volume, bool* muted)
 {
-    if (ctx == NULL || volume == NULL || muted == NULL) return -1;
+    if (ctx == NULL || volume == NULL || muted == NULL)
+        return -1;
 
     // 检查缓存是否有效
     uint64_t now = get_timestamp_ms();
-    if (ctx->cache_valid && ctx->cached_pid == pid &&
-        (now - ctx->cache_timestamp) < IPC_CACHE_TTL_MS)
+    if (ctx->cache_valid && ctx->cached_pid == pid && (now - ctx->cache_timestamp) < IPC_CACHE_TTL_MS)
     {
         *volume = ctx->cached_volume;
         *muted = ctx->cached_muted;
@@ -325,7 +334,8 @@ int ipc_client_get_volume_fast(IPCClientContext* ctx, pid_t pid, float* volume, 
 // 刷新缓存
 int ipc_client_refresh_cache(IPCClientContext* ctx, pid_t pid)
 {
-    if (ctx == NULL) return -1;
+    if (ctx == NULL)
+        return -1;
 
     if (!ipc_client_is_connected(ctx))
     {
@@ -359,7 +369,8 @@ int ipc_client_refresh_cache(IPCClientContext* ctx, pid_t pid)
 // 设置缓存值
 void ipc_client_set_cache(IPCClientContext* ctx, pid_t pid, float volume, bool muted)
 {
-    if (ctx == NULL) return;
+    if (ctx == NULL)
+        return;
 
     ctx->cached_pid = pid;
     ctx->cached_volume = volume;
@@ -369,17 +380,19 @@ void ipc_client_set_cache(IPCClientContext* ctx, pid_t pid, float volume, bool m
 }
 
 // 注册应用
-int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_name,
-                            float initial_volume, bool muted)
+int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_name, float initial_volume, bool muted)
 {
-    if (ctx == NULL || app_name == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL || app_name == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     size_t name_len = strlen(app_name) + 1; // 包含 null 终止符
     size_t payload_len = sizeof(IPCRegisterRequest) + name_len;
 
     uint8_t* payload = malloc(payload_len);
-    if (payload == NULL) return -1;
+    if (payload == NULL)
+        return -1;
 
     IPCRegisterRequest* req = (IPCRegisterRequest*)payload;
     req->pid = pid;
@@ -396,7 +409,8 @@ int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_na
     int result = ipc_client_send_sync(ctx, &request, payload, &response, &resp, sizeof(resp));
     free(payload);
 
-    if (result != 0) return -1;
+    if (result != 0)
+        return -1;
 
     return (response.command == kIPCCommandResponse && resp.status == kIPCStatusOK) ? 0 : -1;
 }
@@ -404,8 +418,10 @@ int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_na
 // 注销应用
 int ipc_client_unregister_app(IPCClientContext* ctx, pid_t pid)
 {
-    if (ctx == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     IPCMessageHeader request;
     ipc_init_header(&request, kIPCCommandUnregister, sizeof(pid_t), 1);
@@ -424,8 +440,10 @@ int ipc_client_unregister_app(IPCClientContext* ctx, pid_t pid)
 // 获取应用音量
 int ipc_client_get_app_volume(IPCClientContext* ctx, pid_t pid, float* volume, bool* muted)
 {
-    if (ctx == NULL || volume == NULL || muted == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL || volume == NULL || muted == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     IPCMessageHeader request;
     ipc_init_header(&request, kIPCCommandGetVolume, sizeof(pid_t), 1);
@@ -451,8 +469,10 @@ int ipc_client_get_app_volume(IPCClientContext* ctx, pid_t pid, float* volume, b
 // 设置应用音量
 int ipc_client_set_app_volume(IPCClientContext* ctx, pid_t pid, float volume)
 {
-    if (ctx == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     IPCSetVolumeRequest req;
     req.pid = pid;
@@ -475,8 +495,10 @@ int ipc_client_set_app_volume(IPCClientContext* ctx, pid_t pid, float volume)
 // 设置应用静音
 int ipc_client_set_app_mute(IPCClientContext* ctx, pid_t pid, bool muted)
 {
-    if (ctx == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     IPCSetMuteRequest req;
     req.pid = pid;
@@ -499,8 +521,10 @@ int ipc_client_set_app_mute(IPCClientContext* ctx, pid_t pid, bool muted)
 // Ping 服务端
 int ipc_client_ping(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return -1;
-    if (!ipc_client_is_connected(ctx)) return -1;
+    if (ctx == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
 
     IPCMessageHeader request;
     ipc_init_header(&request, kIPCCommandPing, 0, 1);
@@ -519,7 +543,8 @@ int ipc_client_ping(IPCClientContext* ctx)
 // 检查是否需要重连
 bool ipc_client_should_reconnect(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return false;
+    if (ctx == NULL)
+        return false;
 
     // 如果未连接且未达到最大重试次数
     if (!ipc_client_is_connected(ctx) && ctx->reconnect_attempts < IPC_RECONNECT_MAX_ATTEMPTS)
@@ -541,7 +566,8 @@ bool ipc_client_should_reconnect(IPCClientContext* ctx)
 // 自动重连
 int ipc_client_reconnect(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return -1;
+    if (ctx == NULL)
+        return -1;
 
     if (ctx->reconnect_attempts >= IPC_RECONNECT_MAX_ATTEMPTS)
     {
@@ -551,7 +577,8 @@ int ipc_client_reconnect(IPCClientContext* ctx)
 
     // 指数退避
     int delay_ms = IPC_RECONNECT_BASE_DELAY_MS * (int)pow(2, ctx->reconnect_attempts);
-    if (delay_ms > 5000) delay_ms = 5000; // 最大 5 秒
+    if (delay_ms > 5000)
+        delay_ms = 5000; // 最大 5 秒
 
     struct timespec ts = {delay_ms / 1000, (delay_ms % 1000) * 1000000};
     nanosleep(&ts, NULL);
@@ -571,6 +598,91 @@ int ipc_client_reconnect(IPCClientContext* ctx)
 // 重置重连计数器
 void ipc_client_reset_reconnect(IPCClientContext* ctx)
 {
-    if (ctx == NULL) return;
+    if (ctx == NULL)
+        return;
     ctx->reconnect_attempts = 0;
+}
+
+// 获取应用列表
+int ipc_client_list_apps(IPCClientContext* ctx, IPCAppInfo** apps, uint32_t* count)
+{
+    if (ctx == NULL || apps == NULL || count == NULL)
+        return -1;
+    if (!ipc_client_is_connected(ctx))
+        return -1;
+
+    IPCMessageHeader request;
+    ipc_init_header(&request, kIPCCommandListClients, 0, 1);
+
+    IPCMessageHeader response = {0};
+    // 分配缓冲区接收列表数据
+    uint8_t* buffer = malloc(IPC_MAX_PAYLOAD_SIZE);
+    if (buffer == NULL)
+        return -1;
+
+    if (ipc_client_send_sync(ctx, &request, NULL, &response, buffer, IPC_MAX_PAYLOAD_SIZE) != 0)
+    {
+        free(buffer);
+        return -1;
+    }
+
+    if (response.command != kIPCCommandResponse || response.payload_len == 0)
+    {
+        free(buffer);
+        *apps = NULL;
+        *count = 0;
+        return (response.command == kIPCCommandResponse) ? 0 : -1;
+    }
+
+    // 计算客户端数量
+    size_t entry_size = sizeof(pid_t) + sizeof(float) + sizeof(bool) + sizeof(uint64_t) + 256;
+    uint32_t app_count = response.payload_len / (uint32_t)entry_size;
+
+    if (app_count == 0)
+    {
+        free(buffer);
+        *apps = NULL;
+        *count = 0;
+        return 0;
+    }
+
+    // 分配应用信息数组
+    IPCAppInfo* app_list = malloc(sizeof(IPCAppInfo) * app_count);
+    if (app_list == NULL)
+    {
+        free(buffer);
+        return -1;
+    }
+
+    // 解析响应数据
+    uint8_t const* ptr = buffer;
+    for (uint32_t i = 0; i < app_count; i++)
+    {
+        // 读取 PID
+        memcpy(&app_list[i].pid, ptr, sizeof(pid_t));
+        ptr += sizeof(pid_t);
+
+        // 读取音量
+        memcpy(&app_list[i].volume, ptr, sizeof(float));
+        ptr += sizeof(float);
+
+        // 读取静音状态
+        memcpy(&app_list[i].muted, ptr, sizeof(bool));
+        ptr += sizeof(bool);
+
+        // 读取连接时间
+        memcpy(&app_list[i].connected_at, ptr, sizeof(uint64_t));
+        ptr += sizeof(uint64_t);
+
+        // 读取应用名称
+        memcpy(app_list[i].app_name, ptr, 256);
+        ptr += 256;
+    }
+
+    free(buffer);
+
+    *apps = app_list;
+    *count = app_count;
+
+    return 0;
 }

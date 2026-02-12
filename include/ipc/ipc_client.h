@@ -209,6 +209,32 @@ int ipc_client_set_app_mute(IPCClientContext* ctx, pid_t pid, bool muted);
 int ipc_client_ping(IPCClientContext* ctx);
 
 // ============================================================================
+// 应用列表查询
+// ============================================================================
+
+/**
+ * 应用信息条目（用于列表查询）
+ */
+typedef struct IPCAppInfo
+{
+    pid_t pid; // 进程ID
+    float volume; // 当前音量 (0.0 - 1.0)
+    bool muted; // 静音状态
+    uint64_t connected_at; // 连接时间戳
+    char app_name[256]; // 应用名称
+} IPCAppInfo;
+
+/**
+ * 获取所有已注册的应用列表
+ *
+ * @param ctx 客户端上下文指针
+ * @param apps 输出应用列表数组（需要调用者使用 free() 释放）
+ * @param count 输出应用数量
+ * @return 成功返回 0，失败返回 -1
+ */
+int ipc_client_list_apps(IPCClientContext* ctx, IPCAppInfo** apps, uint32_t* count);
+
+// ============================================================================
 // 自动重连机制
 // ============================================================================
 

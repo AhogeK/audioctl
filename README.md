@@ -25,8 +25,9 @@ cd audioctl
 ./scripts/install.sh install --release
 
 # 添加到 PATH
-echo 'export PATH="'$(pwd)'/cmake-build-debug/bin:$PATH"' >> ~/.zshrc
+echo 'export PATH="'$(pwd)'/cmake-build-debug/bin:$PATH"' >>~/.zshrc
 source ~/.zshrc
+
 ```
 
 ### 卸载

@@ -1,10 +1,11 @@
 #include "app_volume_control.h"
-#include "virtual_device_manager.h"
-#include "ipc/ipc_client.h"
+#include <CoreServices/CoreServices.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
-#include <CoreServices/CoreServices.h>
+#include "audio_apps.h"
+#include "ipc/ipc_client.h"
+#include "virtual_device_manager.h"
 
 // 全局音量列表
 static AppVolumeList g_volumeList = {0};
@@ -122,8 +123,10 @@ OSStatus app_volume_sync_to_driver(void)
 
 OSStatus app_volume_set(pid_t pid, Float32 volume)
 {
-    if (volume < 0.0f) volume = 0.0f;
-    if (volume > 1.0f) volume = 1.0f;
+    if (volume < 0.0f)
+        volume = 0.0f;
+    if (volume > 1.0f)
+        volume = 1.0f;
 
     pthread_mutex_lock(&g_volumeList.mutex);
 
@@ -255,8 +258,7 @@ OSStatus app_volume_register(pid_t pid, const char* bundleId, const char* name)
             appName = name ? name : bundleId;
         else
             appName = name ? name : "Unknown";
-        ipc_client_register_app(&g_ipcClient, pid, appName,
-                                entry->volume, entry->isMuted);
+        ipc_client_register_app(&g_ipcClient, pid, appName, entry->volume, entry->isMuted);
     }
 
     return noErr;
@@ -390,14 +392,100 @@ void app_volume_cli_list(void)
     VirtualDeviceInfo vInfo;
     if (!virtual_device_get_info(&vInfo))
     {
-        printf("虚拟音频设备未运行\n");
+        printf("⚠️  虚拟音频设备未找到\n");
+        printf("请运行: audioctl use-virtual 激活虚拟设备\n");
         return;
     }
 
-    // 2. 从驱动获取客户端列表
-    // 目前 HAL 属性通信受限，显示提示
-    printf("当前正在重构应用音量控制架构...\n");
-    printf("提示: 正在迁移到 Unix Domain Socket IPC 以支持现代 macOS 安全限制\n");
+    if (!vInfo.isActive)
+    {
+        printf("⚠️  虚拟音频设备未激活（不是当前默认输出设备）\n");
+        printf("请运行: audioctl use-virtual 切换到虚拟设备\n");
+        return;
+    }
+
+    // 2. 初始化 IPC 客户端
+    IPCClientContext ctx;
+    if (ipc_client_init(&ctx) != 0)
+    {
+        printf("❌ 初始化 IPC 客户端失败\n");
+        return;
+    }
+
+    if (ipc_client_connect(&ctx) != 0)
+    {
+        printf("⚠️  IPC 服务未运行，请使用: audioctl --start-service 启动服务\n");
+        ipc_client_cleanup(&ctx);
+        return;
+    }
+
+    // 3. 获取应用列表
+    IPCAppInfo* apps = NULL;
+    uint32_t count = 0;
+
+    // 首先尝试从 IPC 服务获取
+    if (ipc_client_list_apps(&ctx, &apps, &count) != 0 || count == 0)
+    {
+        AudioAppInfo* fApps = NULL;
+        UInt32 fCount = 0;
+        OSStatus err = getAudioApps(&fApps, &fCount);
+
+        if (err == noErr && fCount > 0)
+        {
+            apps = malloc(sizeof(IPCAppInfo) * fCount);
+        }
+
+        if (apps != NULL)
+        {
+            for (UInt32 i = 0; i < fCount; i++)
+            {
+                apps[i].pid = fApps[i].pid;
+                apps[i].volume = fApps[i].volume;
+                apps[i].muted = false;
+                apps[i].connected_at = 0;
+                strncpy(apps[i].app_name, fApps[i].name, sizeof(apps[i].app_name) - 1);
+                apps[i].app_name[sizeof(apps[i].app_name) - 1] = '\0';
+            }
+            count = fCount;
+        }
+
+        if (fApps != NULL)
+        {
+            freeAudioApps(fApps);
+        }
+    }
+
+    // 4. 显示应用列表
+    printf("\n🎵 正在使用虚拟设备的应用 (%d 个):\n", count);
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+    if (apps != NULL && count > 0)
+    {
+        for (uint32_t i = 0; i < count; i++)
+        {
+            const char* mute_status = apps[i].muted ? "🔇 静音" : "";
+            printf("%-25s PID: %-6d  音量: %3.0f%% %s\n", apps[i].app_name, apps[i].pid, apps[i].volume * 100.0f,
+                   mute_status);
+        }
+
+        printf("\n💡 使用以下命令控制音量:\n");
+        printf("   audioctl app-volume <应用名/PID> <0-100>\n");
+        printf("   audioctl app-mute <应用名/PID>\n");
+        printf("   audioctl app-unmute <应用名/PID>\n");
+    }
+    else
+    {
+        printf("暂无应用通过虚拟设备播放音频\n");
+        printf("\n提示: 启动音乐或视频应用，音频将自动路由到虚拟设备\n");
+    }
+
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+
+    // 清理资源
+    if (apps)
+        free(apps);
+    ipc_client_disconnect(&ctx);
+    ipc_client_cleanup(&ctx);
 }
 
 int app_volume_cli_set(const char* appNameOrPid, Float32 volume)

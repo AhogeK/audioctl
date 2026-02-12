@@ -2,8 +2,8 @@
 
 本文件定义了项目开发的核心工作流。它融合了任务追踪（bd）、动态日志系统（DevLog）以及**上下文即代码（Context-as-Code）** 的工程理念。
 
-**⚠️ 核心指令：Agent 必须使用简体中文与用户交互！无论是回复、思考链 (Chain of Thought)、Todo 工具内容还是日志记录，严禁使用英文作为主语言。⚠️
-**
+⚠️**核心指令：Agent 必须使用简体中文与用户交互！无论是回复、思考链 (Chain of Thought)、Todo 工具内容还是日志记录，
+严禁使用英文作为主语言**⚠️
 
 ***
 
@@ -110,121 +110,11 @@ Agent 必须在 `/devlog` 目录下维护实时日志。**所有描述必须使�
 
 ### 代码格式规范
 
-#### 1. 缩进与空格
+以[.clang-format](.clang-format)为准
 
-* **缩进**: 4 个空格 (不使用 Tab)
-* **换行**: Unix 风格 (LF)
-* **大括号**: Allman 风格，单独成行
+同样用户有在使用sonar来规范代码
 
-```c
-// 正确
-if (condition)
-{
-    do_something();
-}
-
-// 错误
-if (condition) {
-    do_something();
-}
-```
-
-#### 2. 命名规范
-
-| 类型        | 命名风格              | 示例                          |
-|-----------|-------------------|-----------------------------|
-| 函数 (公开)   | snake_case        | `aggregate_device_create()` |
-| 函数 (私有静态) | snake_case        | `get_device_uid()`          |
-| 结构体       | PascalCase        | `AudioDeviceInfo`           |
-| 枚举        | PascalCase + k 前缀 | `kDeviceTypeInput`          |
-| 宏/常量      | UPPER_SNAKE_CASE  | `ROUTER_PID_FILE`           |
-| 全局变量      | g_ 前缀 (避免使用)      | -                           |
-| 局部变量      | snake_case        | `device_count`              |
-
-#### 3. 头文件组织
-
-```c
-// 1. Created by 注释
-// Created by AhogeK on 11/20/24.
-
-// 2. Include Guard
-#ifndef AUDIO_CONTROL_H
-#define AUDIO_CONTROL_H
-
-// 3. 系统头文件
-#include <CoreAudio/CoreAudio.h>
-#include <CoreServices/CoreServices.h>
-
-// 4. 项目头文件 (使用引号)
-#include "constants.h"
-
-// 5. 代码内容
-
-#endif // AUDIO_CONTROL_H
-```
-
-#### 4. 源文件组织
-
-```c
-// 1. Created by 注释
-// Created by AhogeK on 11/20/24.
-
-// 2. 项目头文件优先 (引号)
-#include "audio_control.h"
-#include "audio_apps.h"
-
-// 3. 系统头文件 (尖括号)
-#include <signal.h>
-#include <mach-o/dyld.h>
-```
-
-#### 5. 函数定义
-
-```c
-// 函数声明 (头文件)
-OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume);
-
-// 函数定义 (源文件)
-OSStatus setDeviceVolume(AudioDeviceID deviceId, Float32 volume)
-{
-    // 实现代码
-}
-```
-
-#### 6. 错误处理与调试
-
-* 使用 `OSStatus` 返回错误码 (macOS 标准)。
-* 检查所有 `OSStatus` 返回值。
-* 使用 `noErr` 常量判断成功。
-* **CoreAudio 特有**: 遇到 `kAudioHardware...` 错误时，尝试打印 4 字符错误码 (FourCC)。
-
-```c
-OSStatus status = some_function();
-if (status != noErr)
-{
-    // 推荐添加 4CC 转换逻辑以便于调试
-    char fourcc[5] = {0};
-    *(UInt32 *)fourcc = CFSwapInt32HostToBig(status);
-    fprintf(stderr, "Error: %d ('%s')\n", status, fourcc);
-    return status;
-}
-```
-
-#### 7. 注释规范
-
-* 使用 `//` 单行注释。
-* 关键函数添加功能注释。
-* 复杂逻辑添加解释注释。
-* **FIXME/TODO**: 对于临时代码，必须标记 `// TODO: [说明]` 并建议生成对应的 `bd` issue。
-
-#### 8. 内存管理
-
-* **C 标准内存**: 使用 `malloc`/`free`，注意检查 NULL。
-* **CoreFoundation 对象**: 严格遵循 "Create/Copy rule" (需要 Release) 和 "Get rule" (不需要 Release)。
-    * 示例: `CFStringCreate...` 必须配合 `CFRelease`。
-* **Objective-C 代码**: 使用 ARC，无需手动 retain/release。
-
-#### 9. 实时音频线程约束 (Real-time Constraints)
+#### 实时音频线程约束 (Real-time Constraints)
 
 > ⚠️ **在 `AudioDeviceIOProc` 回调中严禁执行以下操作**：
 
@@ -232,26 +122,6 @@ if (status != noErr)
 * **文件 I/O**: 禁止 `printf`, `logging`, 文件读写。
 * **锁操作**: 禁止使用互斥锁 (`pthread_mutex`)，应使用原子操作 (`OSAtomic`, `std::atomic`) 或无锁循环队列。
 * **ObjC 消息发送**: 尽量避免在回调中调用 ObjC 方法，除非确定不会触发锁或内存分配。
-
-#### 10. 布尔值
-
-* 使用 `<stdbool.h>` 的 `bool` 类型。
-* 使用 `true`/`false` 而非 `YES`/`NO` (C 代码)。
-
-***
-
-## 🔨 构建与测试规范 (Build & Test Protocol)
-
-> ⚠️ **严禁手动构建**: Agent 不应手动执行 `mkdir cmake-build-debug` 或直接调用 `cmake`。
-
-* **标准化构建**: 必须使用项目提供的脚本 `./scripts/install.sh` 进行构建和安装。
-    * 构建并安装: `./scripts/install.sh install`
-    * 仅清理: 在脚本中未直接提供，可删除 `cmake-build-*` 目录。
-* **验证流程**:
-
-    1. 代码变更后，运行 `./scripts/install.sh install --no-coreaudio-restart` 进行构建验证。
-    2. 仅在确实需要验证运行时行为且获得用户明确允许时，才重启 CoreAudio。
-  3. **自测闭环**: 在提交代码前，必须编写或运行至少一个相关的测试用例（参考 `tests/` 目录）。
 
 ***
 
@@ -279,77 +149,11 @@ if (status != noErr)
 
 ## ⚠️ 系统级服务操作规范 (System Service Safety)
 
-### CoreAudio 重启黄金法则
+### 📚 事故案例库 (Incident Reference)
 
-> **警告**: 2026-02-11 发生过因频繁重启 CoreAudio 导致系统卡死（负载 200+）的严重事故。必须严格遵守以下规范。
-
-#### 重启前检查清单
-
-执行 CoreAudio 重启**之前**，必须：
-
-1. **检查系统负载**:
-   ```bash
-   uptime
-   # 如果 load average > 5，禁止重启
-   ```
-
-2. **检查现有音频进程**:
-   ```bash
-   ps aux | grep -E "(coreaudiod|audioctl)" | grep -v grep
-   # 确认无僵尸进程
-   ```
-
-3. **用户确认**:
-    - 必须明确告知用户将中断所有音频会话
-    - 必须获得用户明确许可（"是" / "确认"）
-
-#### 重启频率限制
-
-* **单次 Session 最多 3 次**: 超过 3 次必须停止并寻求其他方案
-* **每次间隔至少 30 秒**: 确保服务完全初始化
-* **连续超时 3 次立即停止**: 不得继续重启
-
-#### 重启后验证
-
-重启后必须验证（等待 30 秒后）：
-
-```bash
-# 1. 检查 CoreAudio 进程正常
-ps aux | grep coreaudiod | head -3
-
-# 2. 检查负载恢复正常
-uptime
-# load average 应 < 10
-
-# 3. 测试基本音频功能
-system_profiler SPAudioDataType | head -10
-```
-
-#### 危险信号 (立即停止)
-
-遇到以下情况**立即停止所有操作**：
-
-* 系统负载持续上升超过 10
-* CoreAudio CPU 占用 > 50% 持续 10 秒
-* 任何命令连续超时 3 次
-* Audio MIDI Setup 无法打开
-
-#### 事故响应
-
-如发生系统卡顿：
-
-1. **立即停止**: 不再执行任何命令
-2. **等待恢复**: 给予系统 2-5 分钟自行恢复时间
-3. **温和重启**: 如果必须重启，使用 `killall -9 coreaudiod` 后等待
-4. **记录事故**: 在 `devlog/incidents/` 创建事故报告
-
-***
-
-## 📚 事故案例库 (Incident Reference)
-
-### [INCIDENT-2026-02-11] CoreAudio 频繁重启导致系统卡死
-
-**详情**: `devlog/incidents/INCIDENT_2026_02_11_CoreAudio_System_Crash.md`
+**详情 **:
+[1](devlog/incidents/INCIDENT_2026_02_11_CoreAudio_System_Crash.md)
+[2](devlog/incidents/INCIDENT_2026_02_12_CoreAudio_Install_Crash.md)
 
 **教训**:
 
@@ -358,4 +162,3 @@ system_profiler SPAudioDataType | head -10
 - 发现超时后错误地继续重启，形成恶性循环
 
 **后续**: 用户被迫强制重启电脑，丢失未保存工作。
-

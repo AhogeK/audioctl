@@ -4,31 +4,30 @@
 //
 
 #include "virtual_device_manager.h"
-#include "aggregate_device_manager.h"
-#include "audio_control.h"
-#include "ipc/ipc_protocol.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "aggregate_device_manager.h"
+#include "audio_control.h"
+#include "ipc/ipc_protocol.h"
 
 #pragma mark - 内部辅助函数
 
 // 获取所有音频设备列表
 static OSStatus get_all_devices(AudioDeviceID** devices, UInt32* count)
 {
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioHardwarePropertyDevices,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal,
+                                                  kAudioObjectPropertyElementMain};
 
     UInt32 dataSize = 0;
     OSStatus status = AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize);
-    if (status != noErr) return status;
+    if (status != noErr)
+        return status;
 
     *count = dataSize / sizeof(AudioDeviceID);
     *devices = (AudioDeviceID*)malloc(dataSize);
-    if (*devices == NULL) return -1;
+    if (*devices == NULL)
+        return -1;
 
     status = AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize, *devices);
     if (status != noErr)
@@ -45,14 +44,12 @@ static OSStatus get_device_uid(AudioDeviceID deviceId, char* uid, size_t uidSize
 {
     CFStringRef uidRef = NULL;
     UInt32 dataSize = sizeof(CFStringRef);
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioDevicePropertyDeviceUID,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+                                                  kAudioObjectPropertyElementMain};
 
     OSStatus status = AudioObjectGetPropertyData(deviceId, &propertyAddress, 0, NULL, &dataSize, &uidRef);
-    if (status != noErr || uidRef == NULL) return status;
+    if (status != noErr || uidRef == NULL)
+        return status;
 
     CFStringGetCString(uidRef, uid, (CFIndex)uidSize, kCFStringEncodingUTF8);
     CFRelease(uidRef);
@@ -65,11 +62,8 @@ static OSStatus get_device_name(AudioDeviceID deviceId, char* name, size_t nameS
 {
     CFStringRef nameRef = NULL;
     UInt32 dataSize = sizeof(CFStringRef);
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioObjectPropertyName,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal,
+                                                  kAudioObjectPropertyElementMain};
 
     OSStatus status = AudioObjectGetPropertyData(deviceId, &propertyAddress, 0, NULL, &dataSize, &nameRef);
     if (status != noErr || nameRef == NULL)
@@ -77,7 +71,8 @@ static OSStatus get_device_name(AudioDeviceID deviceId, char* name, size_t nameS
         // 尝试备用属性
         propertyAddress.mSelector = kAudioDevicePropertyDeviceNameCFString;
         status = AudioObjectGetPropertyData(deviceId, &propertyAddress, 0, NULL, &dataSize, &nameRef);
-        if (status != noErr || nameRef == NULL) return status;
+        if (status != noErr || nameRef == NULL)
+            return status;
     }
 
     CFStringGetCString(nameRef, name, (CFIndex)nameSize, kCFStringEncodingUTF8);
@@ -95,8 +90,7 @@ static bool is_virtual_device(AudioDeviceID deviceId)
     get_device_uid(deviceId, uid, sizeof(uid));
     get_device_name(deviceId, name, sizeof(name));
 
-    return (strstr(uid, VIRTUAL_DEVICE_UID) != NULL ||
-        strstr(name, "Virtual Audio") != NULL);
+    return (strstr(uid, VIRTUAL_DEVICE_UID) != NULL || strstr(name, "Virtual Audio") != NULL);
 }
 
 // 搜索所有设备以查找虚拟设备
@@ -145,11 +139,8 @@ static AudioDeviceID get_default_output_device(void)
 {
     AudioDeviceID deviceId = kAudioObjectUnknown;
     UInt32 dataSize = sizeof(AudioDeviceID);
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioHardwarePropertyDefaultOutputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultOutputDevice,
+                                                  kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 
     AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize, &deviceId);
     return deviceId;
@@ -160,11 +151,8 @@ static AudioDeviceID get_default_input_device(void)
 {
     AudioDeviceID deviceId = kAudioObjectUnknown;
     UInt32 dataSize = sizeof(AudioDeviceID);
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioHardwarePropertyDefaultInputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultInputDevice,
+                                                  kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 
     AudioObjectGetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, &dataSize, &deviceId);
     return deviceId;
@@ -180,7 +168,8 @@ bool virtual_device_is_installed(void)
 
 bool virtual_device_get_info(VirtualDeviceInfo* outInfo)
 {
-    if (outInfo == NULL) return false;
+    if (outInfo == NULL)
+        return false;
 
     memset(outInfo, 0, sizeof(VirtualDeviceInfo));
 
@@ -206,12 +195,14 @@ bool virtual_device_get_info(VirtualDeviceInfo* outInfo)
 bool virtual_device_is_active_output(void)
 {
     AudioDeviceID virtualDevice = find_virtual_device();
-    if (virtualDevice == kAudioObjectUnknown) return false;
+    if (virtualDevice == kAudioObjectUnknown)
+        return false;
 
     AudioDeviceID defaultOutput = get_default_output_device();
 
     // 如果默认输出是虚拟设备，或者默认输出是聚合设备（且该聚合设备包含虚拟设备）
-    if (defaultOutput == virtualDevice) return true;
+    if (defaultOutput == virtualDevice)
+        return true;
 
     if (aggregate_device_is_active())
     {
@@ -224,16 +215,14 @@ bool virtual_device_is_active_output(void)
 bool virtual_device_is_active_input(void)
 {
     AudioDeviceID virtualDevice = find_virtual_device();
-    if (virtualDevice == kAudioObjectUnknown) return false;
+    if (virtualDevice == kAudioObjectUnknown)
+        return false;
 
     AudioDeviceID defaultInput = get_default_input_device();
     return virtualDevice == defaultInput;
 }
 
-bool virtual_device_is_active(void)
-{
-    return virtual_device_is_active_output() || virtual_device_is_active_input();
-}
+bool virtual_device_is_active(void) { return virtual_device_is_active_output() || virtual_device_is_active_input(); }
 
 #pragma mark - 设备控制
 
@@ -246,11 +235,8 @@ OSStatus virtual_device_set_as_default_output(void)
         return -1;
     }
 
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioHardwarePropertyDefaultOutputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultOutputDevice,
+                                                  kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 
     OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL,
                                                  sizeof(AudioDeviceID), &virtualDevice);
@@ -276,11 +262,8 @@ OSStatus virtual_device_set_as_default_input(void)
         return -1;
     }
 
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioHardwarePropertyDefaultInputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultInputDevice,
+                                                  kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 
     OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL,
                                                  sizeof(AudioDeviceID), &virtualDevice);
@@ -312,6 +295,107 @@ OSStatus virtual_device_activate(void)
     return (status1 != noErr) ? status1 : status2;
 }
 
+// 【新架构】激活虚拟设备并启动 Router（串联模式）
+// App -> Virtual Device -> Router -> Physical Device
+OSStatus virtual_device_activate_with_router(void)
+{
+    // 1. 【修复】使用 UID 查找虚拟设备，而不是硬编码 ID
+    // CoreAudio 重启后设备 ID 会重新分配
+    AudioDeviceID virtualDevice = kAudioObjectUnknown;
+    {
+        AudioObjectPropertyAddress addr = {kAudioHardwarePropertyTranslateUIDToDevice, kAudioObjectPropertyScopeGlobal,
+                                           kAudioObjectPropertyElementMain};
+        CFStringRef uidRef = CFStringCreateWithCString(NULL, VIRTUAL_DEVICE_UID, kCFStringEncodingUTF8);
+        UInt32 size = sizeof(virtualDevice);
+        OSStatus findStatus = AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, sizeof(CFStringRef), &uidRef,
+                                                         &size, &virtualDevice);
+        CFRelease(uidRef);
+
+        if (findStatus != noErr || virtualDevice == kAudioObjectUnknown)
+        {
+            fprintf(stderr, "❌ 虚拟音频设备未找到 (UID: %s)\n", VIRTUAL_DEVICE_UID);
+            return kAudioHardwareBadDeviceError;
+        }
+        printf("🔍 找到虚拟设备: ID=%d, UID=%s\n", virtualDevice, VIRTUAL_DEVICE_UID);
+    }
+
+    // 2. 【关键修复】直接设置虚拟设备为默认，不查询其他设备
+    // 查询其他设备会导致 CoreAudio 状态改变，使设置失败
+
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultOutputDevice,
+                                                  kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+
+    // 重试最多 3 次
+    int retry = 0;
+    const int maxRetries = 3;
+    while (retry < maxRetries)
+    {
+        OSStatus status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL,
+                                                     sizeof(AudioDeviceID), &virtualDevice);
+
+        if (status == noErr)
+        {
+            printf("   AudioObjectSetPropertyData 成功\n");
+        }
+        else
+        {
+            printf("   AudioObjectSetPropertyData 失败: %d\n", status);
+        }
+
+        if (status == noErr)
+        {
+            // 验证设置是否生效
+            struct timespec verifyTs = {0, 200000000}; // 200ms
+            nanosleep(&verifyTs, NULL);
+
+            AudioDeviceID currentDefault = get_default_output_device();
+            printf("   尝试 %d: 当前默认设备 ID=%d, 目标=%d\n", retry + 1, currentDefault, virtualDevice);
+            if (currentDefault == virtualDevice)
+            {
+                printf("✅ 设置成功！\n");
+                break; // 设置成功且已生效
+            }
+            printf("⚠️  默认设备未立即生效，等待重试...\n");
+        }
+        else
+        {
+            fprintf(stderr, "⚠️  设置默认设备失败 (尝试 %d/%d): %d\n", retry + 1, maxRetries, status);
+        }
+
+        retry++;
+        if (retry < maxRetries)
+        {
+            struct timespec retryTs = {0, 300000000}; // 300ms
+            nanosleep(&retryTs, NULL);
+        }
+    }
+
+    if (retry >= maxRetries)
+    {
+        fprintf(stderr, "❌ 无法将虚拟设备设为默认输出\n");
+        return kAudioHardwareUnspecifiedError;
+    }
+
+    // 4. 同时设为默认输入
+    propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+    AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, sizeof(AudioDeviceID),
+                               &virtualDevice);
+
+    // 5. 【修复】再次验证
+    AudioDeviceID verifyOutput = get_default_output_device();
+    if (verifyOutput != virtualDevice)
+    {
+        fprintf(stderr, "❌ 验证失败：默认设备未切换到虚拟设备\n");
+        return kAudioHardwareUnspecifiedError;
+    }
+
+    printf("✅ 虚拟音频设备已设为默认输出\n");
+    printf("   音频流: 应用 → 虚拟设备(音量控制) → 物理扬声器\n");
+    printf("   提示: 启动 Router 后将自动转发音频\n");
+
+    return noErr;
+}
+
 OSStatus virtual_device_deactivate(void)
 {
     // 查找第一个非虚拟设备并设为默认
@@ -319,7 +403,8 @@ OSStatus virtual_device_deactivate(void)
     UInt32 count = 0;
 
     OSStatus status = get_all_devices(&devices, &count);
-    if (status != noErr || devices == NULL) return status;
+    if (status != noErr || devices == NULL)
+        return status;
 
     AudioDeviceID firstPhysicalDevice = kAudioObjectUnknown;
 
@@ -335,11 +420,8 @@ OSStatus virtual_device_deactivate(void)
         }
 
         // 检查是否为输出设备
-        AudioObjectPropertyAddress propertyAddress = {
-            kAudioDevicePropertyStreamConfiguration,
-            kAudioDevicePropertyScopeOutput,
-            kAudioObjectPropertyElementMain
-        };
+        AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyStreamConfiguration,
+                                                      kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain};
 
         UInt32 dataSize = 0;
         if (AudioObjectGetPropertyDataSize(devices[i], &propertyAddress, 0, NULL, &dataSize) == noErr && dataSize > 0)
@@ -358,14 +440,11 @@ OSStatus virtual_device_deactivate(void)
     }
 
     // 设为默认输出
-    AudioObjectPropertyAddress propertyAddress = {
-        kAudioHardwarePropertyDefaultOutputDevice,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain
-    };
+    AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyDefaultOutputDevice,
+                                                  kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
 
-    status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL,
-                                        sizeof(AudioDeviceID), &firstPhysicalDevice);
+    status = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, NULL, sizeof(AudioDeviceID),
+                                        &firstPhysicalDevice);
 
     if (status == noErr)
     {
@@ -459,20 +538,22 @@ void virtual_device_print_status(void)
 
 OSStatus virtual_device_get_current_output_info(VirtualDeviceInfo* outInfo)
 {
-    if (outInfo == NULL) return paramErr;
+    if (outInfo == NULL)
+        return paramErr;
 
     memset(outInfo, 0, sizeof(VirtualDeviceInfo));
 
     AudioDeviceID currentDevice = get_default_output_device();
-    if (currentDevice == kAudioObjectUnknown) return -1;
+    if (currentDevice == kAudioObjectUnknown)
+        return -1;
 
     outInfo->deviceId = currentDevice;
     get_device_name(currentDevice, outInfo->name, sizeof(outInfo->name));
     get_device_uid(currentDevice, outInfo->uid, sizeof(outInfo->uid));
 
     // 检查是否是虚拟设备
-    outInfo->isInstalled = (strstr(outInfo->uid, VIRTUAL_DEVICE_UID) != NULL ||
-        strstr(outInfo->name, "Virtual") != NULL);
+    outInfo->isInstalled =
+        (strstr(outInfo->uid, VIRTUAL_DEVICE_UID) != NULL || strstr(outInfo->name, "Virtual") != NULL);
     outInfo->isActive = true; // 既然是默认设备，就是active的
 
     return noErr;

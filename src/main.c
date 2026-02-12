@@ -1,31 +1,63 @@
-#include "audio_control.h"
-#include "audio_apps.h"
-#include "service_manager.h"
-#include "constants.h"
-#include "app_volume_control.h"
-#include "virtual_device_manager.h"
+#include <errno.h>
+#include <mach-o/dyld.h>
+#include <signal.h>
+#include <spawn.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/file.h>
+#include <unistd.h>
 #include "aggregate_device_manager.h"
 #include "aggregate_volume_proxy.h"
+#include "app_volume_control.h"
+#include "audio_apps.h"
+#include "audio_control.h"
 #include "audio_router.h"
+#include "constants.h"
 #include "ipc/ipc_protocol.h"
 #include "ipc/ipc_server.h"
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/file.h>
-#include <mach-o/dyld.h>
-#include <spawn.h>
+#include "service_manager.h"
+#include "virtual_device_manager.h"
+
+// 物理设备绑定配置路径
+#define ROUTER_TARGET_UID_FILE "~/Library/Application Support/audioctl/target_device.uid"
+
+// 读取目标物理设备 UID
+static bool load_target_device_uid(char* uid, size_t size)
+{
+    char path[PATH_MAX];
+    if (get_ipc_socket_path(path, sizeof(path)) != 0)
+        return false;
+    char* last_slash = strrchr(path, '/');
+    if (last_slash)
+    {
+        strcpy(last_slash + 1, "target_device.uid");
+    }
+    FILE* fp = fopen(path, "r");
+    if (!fp)
+        return false;
+    bool success = fgets(uid, (int)size, fp) != NULL;
+    fclose(fp);
+    if (success)
+    {
+        // 移除换行符
+        char* p = strpbrk(uid, "\r\n");
+        if (p)
+        {
+            *p = '\0';
+        }
+    }
+    return success;
+}
 
 static void kill_router(void)
 {
     char pid_path[PATH_MAX];
     char lock_path[PATH_MAX];
 
-    if (get_pid_file_path(pid_path, sizeof(pid_path)) != 0) return;
-    if (get_lock_file_path(lock_path, sizeof(lock_path)) != 0) return;
+    if (get_pid_file_path(pid_path, sizeof(pid_path)) != 0)
+        return;
+    if (get_lock_file_path(lock_path, sizeof(lock_path)) != 0)
+        return;
 
     // 1. 尝试通过 PID 文件停止
     FILE* fp = fopen(pid_path, "r");
@@ -104,7 +136,8 @@ void spawn_ipc_service(const char* self_path)
     // 清理资源
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attr);
-    if (dev_null >= 0) close(dev_null);
+    if (dev_null >= 0)
+        close(dev_null);
 
     if (ret == 0)
     {
@@ -267,10 +300,7 @@ void printUsage()
     printf("\n选项：\n");
     for (int i = 0; options[i].shortOpt != 0; i++)
     {
-        printf(" -%c, --%-12s - %s\n",
-               options[i].shortOpt,
-               options[i].longOpt,
-               options[i].description);
+        printf(" -%c, --%-12s - %s\n", options[i].shortOpt, options[i].longOpt, options[i].description);
     }
 
     printf("\n选项可组合使用，例如：\n");
@@ -421,8 +451,8 @@ static void printDeviceTypeAndChannels(const AudioDeviceInfo* info)
         printf("输出设备 (通道数: %d)", info->outputChannelCount);
         break;
     case kDeviceTypeInputOutput:
-        printf("输入/输出设备 (输入通道: %d, 输出通道: %d, 总通道: %d)",
-               info->inputChannelCount, info->outputChannelCount, info->channelCount);
+        printf("输入/输出设备 (输入通道: %d, 输出通道: %d, 总通道: %d)", info->inputChannelCount,
+               info->outputChannelCount, info->channelCount);
         break;
     default:
         printf("未知类型");
@@ -511,9 +541,7 @@ void printDeviceInfo(const AudioDeviceInfo* info)
         printf(", 位深度: %d bits", info->bitsPerChannel);
         printf(", 格式: %s", getFormatFlagsDescription(info->formatFlags));
     }
-    printf(", 状态: %s%s%s",
-           info->isRunning ? ANSI_COLOR_GREEN : "",
-           info->isRunning ? "使用中" : "空闲",
+    printf(", 状态: %s%s%s", info->isRunning ? ANSI_COLOR_GREEN : "", info->isRunning ? "使用中" : "空闲",
            info->isRunning ? ANSI_COLOR_RESET : "");
     printf("\n\n");
 }
@@ -571,8 +599,7 @@ static bool isDeviceMatched(const AudioDeviceInfo* device, const ProgramOptions*
 }
 
 // 计算匹配的设备数量
-static UInt32 countMatchedDevices(const AudioDeviceInfo* devices, UInt32 deviceCount,
-                                  const ProgramOptions* opts)
+static UInt32 countMatchedDevices(const AudioDeviceInfo* devices, UInt32 deviceCount, const ProgramOptions* opts)
 {
     UInt32 matchedCount = 0;
     for (UInt32 i = 0; i < deviceCount; i++)
@@ -701,7 +728,7 @@ static bool findRunningDevice(bool isInput, AudioDeviceID* deviceId, char** devi
     {
         if (devices[i].isRunning &&
             ((isInput && devices[i].deviceType == kDeviceTypeInput) ||
-                (!isInput && devices[i].deviceType == kDeviceTypeOutput)))
+             (!isInput && devices[i].deviceType == kDeviceTypeOutput)))
         {
             *deviceId = devices[i].deviceId;
             *deviceName = strdup(devices[i].name); // 复制设备名称
@@ -770,14 +797,12 @@ static int handleVolumeSet(int argc, char* argv[])
     OSStatus status = setDeviceVolume(targetDeviceId, volume / 100.0f);
     if (status != noErr)
     {
-        printf("错误：设置%s设备 '%s' 的音量失败\n",
-               isInput ? "输入" : "输出", deviceName);
+        printf("错误：设置%s设备 '%s' 的音量失败\n", isInput ? "输入" : "输出", deviceName);
         free(deviceName); // 直接释放，无需类型转换
         return 1;
     }
 
-    printf("已将%s设备 '%s' 的音量设置为 %.1f%%\n",
-           isInput ? "输入" : "输出", deviceName, volume);
+    printf("已将%s设备 '%s' 的音量设置为 %.1f%%\n", isInput ? "输入" : "输出", deviceName, volume);
     free(deviceName); // 直接释放，无需类型转换
     return 0;
 }
@@ -814,8 +839,7 @@ static int handleDeviceSwitch(int argc, char* argv[])
     }
 
     const char* deviceTypeStr = getDeviceTypeString(deviceInfo.deviceType);
-    printf("已将%s设备 '%s' (ID: %ld) 设置为使用中\n",
-           deviceTypeStr, deviceInfo.name, deviceId);
+    printf("已将%s设备 '%s' (ID: %ld) 设置为使用中\n", deviceTypeStr, deviceInfo.name, deviceId);
     return 0;
 }
 
@@ -828,14 +852,13 @@ static int handleSetCommand(int argc, char* argv[])
         return 1;
     }
 
-    return (argv[2][0] == '-')
-               ? handleVolumeSet(argc, argv)
-               : handleDeviceSwitch(argc, argv);
+    return (argv[2][0] == '-') ? handleVolumeSet(argc, argv) : handleDeviceSwitch(argc, argv);
 }
 
 static int handleAppVolumeCommands(int argc, char* argv[])
 {
-    if (!aggregate_device_is_active())
+    // 【修复】串联架构下，检查虚拟设备是否激活，而不是 Aggregate Device
+    if (!virtual_device_is_active())
     {
         printf("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
         if (strcmp(argv[1], "app-volumes") == 0)
@@ -901,12 +924,25 @@ static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
     {
         if (!virtual_device_is_installed())
         {
-            printf(
-                "❌ 虚拟音频设备未安装\n\n请运行以下命令安装:\n  cd cmake-build-debug\n  sudo ninja install\n\n安装后重启音频服务:\n  sudo launchctl kickstart -k system/com.apple.audio.coreaudiod\n");
+            printf("❌ 虚拟音频设备未安装\n\n请运行以下命令安装:\n  cd cmake-build-debug\n  sudo ninja "
+                   "install\n\n安装后重启音频服务:\n  sudo launchctl kickstart -k system/com.apple.audio.coreaudiod\n");
             return 1;
         }
-        if (aggregate_device_activate() != noErr) return 1;
 
+        // 【新架构】使用串联模式（Serial Mode）
+        // App -> Virtual Device -> Router -> Physical Speaker
+        // 这是实现应用分轨音量控制的必要条件
+
+        // 【重要修复】不要在切换前查询当前物理设备！
+        // 查询当前默认设备会锁定 CoreAudio 状态，阻止后续切换
+        // 而是在激活成功后，Router 会自动绑定到当前系统默认的物理设备
+
+        // 1. 切换到串联模式（直接使用 Virtual Device 作为默认输出）
+        if (virtual_device_activate_with_router() != noErr)
+            return 1;
+
+        // 2. 启动 Router 和 IPC 服务
+        // Router 会读取配置文件中保存的物理设备 UID
         char self_path[4096];
         uint32_t size = sizeof(self_path);
         if (_NSGetExecutablePath(self_path, &size) == 0)
@@ -914,7 +950,8 @@ static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
             spawn_router(self_path);
             spawn_ipc_service(self_path);
         }
-        else fprintf(stderr, "无法获取可执行文件路径，服务无法启动\n");
+        else
+            fprintf(stderr, "无法获取可执行文件路径，服务无法启动\n");
         return 0;
     }
 
@@ -922,7 +959,10 @@ static int handleVirtualDeviceCommands(int __unused argc, char* argv[])
     {
         kill_router();
         kill_ipc_service();
-        return aggregate_device_deactivate() == noErr ? 0 : 1;
+        // 停止 Router
+        audio_router_stop();
+        // 恢复到物理设备
+        return virtual_device_deactivate() == noErr ? 0 : 1;
     }
 
     if (strcmp(argv[1], "agg-status") == 0)
@@ -979,22 +1019,26 @@ int main(const int argc, char* argv[])
 
     const char* cmd = argv[1];
 
-    if (handleVersionCommand(cmd)) return 0;
+    if (handleVersionCommand(cmd))
+        return 0;
     if (strcmp(cmd, "help") == 0)
     {
         printUsage();
         return 0;
     }
 
-    if (strcmp(cmd, "list") == 0) return handleListCommand(argc, argv);
-    if (strcmp(cmd, "set") == 0) return handleSetCommand(argc, argv);
-    if (strcmp(cmd, "apps") == 0) return handleAppsCommand();
+    if (strcmp(cmd, "list") == 0)
+        return handleListCommand(argc, argv);
+    if (strcmp(cmd, "set") == 0)
+        return handleSetCommand(argc, argv);
+    if (strcmp(cmd, "apps") == 0)
+        return handleAppsCommand();
 
-    if (strncmp(cmd, "app-", 4) == 0) return handleAppVolumeCommands(argc, argv);
+    if (strncmp(cmd, "app-", 4) == 0)
+        return handleAppVolumeCommands(argc, argv);
 
-    if (strcmp(cmd, "virtual-status") == 0 || strcmp(cmd, "use-virtual") == 0 ||
-        strcmp(cmd, "use-physical") == 0 || strcmp(cmd, "agg-status") == 0 ||
-        strcmp(cmd, "internal-delete-aggregate") == 0)
+    if (strcmp(cmd, "virtual-status") == 0 || strcmp(cmd, "use-virtual") == 0 || strcmp(cmd, "use-physical") == 0 ||
+        strcmp(cmd, "agg-status") == 0 || strcmp(cmd, "internal-delete-aggregate") == 0)
     {
         return handleVirtualDeviceCommands(argc, argv);
     }
@@ -1023,19 +1067,56 @@ int main(const int argc, char* argv[])
             return 1;
         }
 
-        // 写入当前 PID 到锁文件 (便于调试，虽主要依赖 flock)
+        // 写入当前 PID 到锁文件
         char pid_str[32];
         snprintf(pid_str, sizeof(pid_str), "%d", getpid());
         ftruncate(lock_fd, 0);
         write(lock_fd, pid_str, strlen(pid_str));
-        // 注意：不关闭 lock_fd，进程退出时系统会自动释放锁
 
-        aggregate_device_init();
-        start_router_loop();
-        aggregate_device_cleanup();
+        // 【新架构】启动串联模式 Router
+        // 读取绑定的物理设备 UID
+        char target_uid[256] = {0};
+        if (!load_target_device_uid(target_uid, sizeof(target_uid)))
+        {
+            fprintf(stderr, "❌ 未找到绑定的物理设备配置\n");
+            fprintf(stderr, "   请先运行 'audioctl use-virtual'\n");
+            close(lock_fd);
+            unlink(lock_path);
+            return 1;
+        }
+
+        printf("🔄 启动 Audio Router (串联架构)...\n");
+        printf("   目标物理设备: %s\n", target_uid);
+
+        // 启动 Router
+        OSStatus status = audio_router_start(target_uid);
+        if (status != noErr)
+        {
+            fprintf(stderr, "❌ 启动 Router 失败: %d\n", status);
+            close(lock_fd);
+            unlink(lock_path);
+            return 1;
+        }
+
+        printf("✅ Audio Router 已启动\n");
+        printf("   音频流: Virtual Device -> Ring Buffer -> Physical Device\n");
+
+        // 保持运行直到收到信号
+        signal(SIGTERM, SIG_DFL);
+        signal(SIGINT, SIG_DFL);
+
+        // 使用 CFRunLoop 或简单循环保持进程
+        while (audio_router_is_running())
+        {
+            sleep(1);
+        }
+
+        // 停止 Router
+        audio_router_stop();
 
         // 退出前清理锁文件
         unlink(lock_path);
+        close(lock_fd);
         return 0;
     }
 
@@ -1056,7 +1137,8 @@ int main(const int argc, char* argv[])
         return 0;
     }
 
-    if (strncmp(cmd, "--", 2) == 0) return handleServiceCommands(cmd);
+    if (strncmp(cmd, "--", 2) == 0)
+        return handleServiceCommands(cmd);
 
     printf("未知命令: %s\n", cmd);
     printUsage();

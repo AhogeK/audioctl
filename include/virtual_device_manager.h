@@ -55,6 +55,10 @@ OSStatus virtual_device_set_as_default_input(void);
 // 切换到虚拟设备（同时设为默认输入和输出）
 OSStatus virtual_device_activate(void);
 
+// 【新架构】激活虚拟设备并启动 Router（串联模式）
+// App -> Virtual Device -> Router -> Physical Device
+OSStatus virtual_device_activate_with_router(void);
+
 // 恢复到物理设备（查找第一个非虚拟设备设为默认）
 OSStatus virtual_device_deactivate(void);
 
@@ -76,4 +80,4 @@ bool virtual_device_can_control_app_volume(void);
 // 返回一个描述字符串，说明为什么可以或不可以进行应用音量控制
 const char* virtual_device_get_app_volume_status(void);
 
-#endif //AUDIOCTL_VIRTUAL_DEVICE_MANAGER_H
+#endif // AUDIOCTL_VIRTUAL_DEVICE_MANAGER_H

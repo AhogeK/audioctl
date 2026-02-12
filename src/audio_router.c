@@ -1,220 +1,374 @@
+//
+// Audio Router - 串联架构核心实现
+// Virtual Device -> Ring Buffer -> Physical Device
+// Created by AhogeK on 02/12/26.
+//
+
+#include "audio_router.h"
 #include <CoreAudio/CoreAudio.h>
+#include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <unistd.h>
-#include <signal.h>
-#include "aggregate_device_manager.h"
+#include "virtual_device_manager.h"
 
-static volatile bool g_running = true;
+static AudioRouterContext g_router = {0};
 
-static void signal_handler(int __unused sig)
+// ====== 环形缓冲区实现 (Lock-Free) ======
+
+static void rb_init(RouterRingBuffer* rb, uint32_t capacity_frames, uint32_t channels)
 {
-    g_running = false;
+    rb->capacity = capacity_frames * channels;
+    rb->buffer = (float*)calloc(rb->capacity, sizeof(float));
+    atomic_init(&rb->write_pos, 0);
+    atomic_init(&rb->read_pos, 0);
 }
 
-static void handle_interleaved_output(const Float32* in, Float32* out, UInt32 frames)
+static void rb_destroy(RouterRingBuffer* rb)
 {
-    for (UInt32 f = 0; f < frames; f++)
+    if (rb->buffer)
     {
-        // 虚拟输入 1-2 (inInputData 通道 1-2) -> 物理输出 3-4 (outOutputData 通道 3-4)
-        out[f * 4 + 2] += in[f * 2];
-        out[f * 4 + 3] += in[f * 2 + 1];
+        free(rb->buffer);
+        rb->buffer = NULL;
     }
 }
 
-static void handle_separated_output(const Float32* in, Float32* out, UInt32 frames)
+// 写入数据（输入回调调用 - Producer）
+static void rb_write(RouterRingBuffer* rb, const float* data, uint32_t frame_count, uint32_t channels)
 {
-    UInt32 totalSamples = frames * 2;
-    for (UInt32 i = 0; i < totalSamples; i++)
+    uint32_t sample_count = frame_count * channels;
+    uint32_t current_write = atomic_load_explicit(&rb->write_pos, memory_order_relaxed);
+    uint32_t current_read = atomic_load_explicit(&rb->read_pos, memory_order_acquire);
+
+    // 计算可用空间 (capacity - 1 to distinguish full from empty)
+    uint32_t size = (current_write >= current_read) ? (current_write - current_read)
+                                                    : (rb->capacity - current_read + current_write);
+    uint32_t free_space = rb->capacity - 1 - size;
+
+    if (free_space < sample_count)
     {
-        out[i] += in[i];
+        g_router.overrun_count++;
+        // 策略：丢弃新数据 (或者覆盖旧数据，这里选择简单丢弃以保持同步)
+        return;
     }
+
+    for (uint32_t i = 0; i < sample_count; i++)
+    {
+        rb->buffer[current_write] = data[i];
+        current_write = (current_write + 1) % rb->capacity;
+    }
+
+    atomic_store_explicit(&rb->write_pos, current_write, memory_order_release);
 }
 
-/* 
- * CoreAudio IO 回调函数。
- * 注意：outOutputData 的签名由系统定义，必须为非 const 才能通过函数指针校验。
- */
-static OSStatus ioProc(AudioDeviceID __unused inDevice,
-                       const AudioTimeStamp* __unused inNow,
-                       const AudioBufferList* inInputData,
-                       const AudioTimeStamp* __unused inInputTime,
-                       AudioBufferList* outOutputData,
-                       const AudioTimeStamp* __unused inOutputTime,
-                       void* __unused inClientData)
+// 读取数据（输出回调调用 - Consumer）
+static void rb_read(RouterRingBuffer* rb, float* data, uint32_t frame_count, uint32_t channels)
 {
-    OSStatus status = noErr;
+    uint32_t sample_count = frame_count * channels;
+    uint32_t current_read = atomic_load_explicit(&rb->read_pos, memory_order_relaxed);
+    uint32_t current_write = atomic_load_explicit(&rb->write_pos, memory_order_acquire);
 
-    if (inInputData->mNumberBuffers == 0)
+    uint32_t available = (current_write >= current_read) ? (current_write - current_read)
+                                                         : (rb->capacity - current_read + current_write);
+
+    if (available < sample_count)
+    {
+        g_router.underrun_count++;
+        // 数据不足，输出静音
+        memset(data, 0, sample_count * sizeof(float));
+        return;
+    }
+
+    for (uint32_t i = 0; i < sample_count; i++)
+    {
+        data[i] = rb->buffer[current_read];
+        current_read = (current_read + 1) % rb->capacity;
+    }
+
+    atomic_store_explicit(&rb->read_pos, current_read, memory_order_release);
+}
+
+// ====== IO 回调函数 ======
+
+// 输入回调：从虚拟设备读取数据 -> 存入 RingBuffer
+static OSStatus input_callback(AudioDeviceID inDevice, const AudioTimeStamp* inNow, const AudioBufferList* inInputData,
+                               const AudioTimeStamp* inInputTime, AudioBufferList* outOutputData,
+                               const AudioTimeStamp* inOutputTime, void* inClientData)
+{
+    (void)inDevice;
+    (void)inNow;
+    (void)inInputTime;
+    (void)outOutputData;
+    (void)inOutputTime;
+    (void)inClientData;
+
+    if (!g_router.is_running || inInputData->mNumberBuffers == 0)
     {
         return noErr;
     }
 
-    if (outOutputData->mNumberBuffers < 1)
-    {
-        return kAudioHardwareUnsupportedOperationError;
-    }
-
-    // 获取输入 (来自虚拟设备)
     const AudioBuffer* inputBuffer = &inInputData->mBuffers[0];
-    if (inputBuffer->mDataByteSize == 0)
+    if (inputBuffer->mDataByteSize == 0 || inputBuffer->mData == NULL)
     {
         return noErr;
     }
 
-    const Float32* in = (const Float32*)inputBuffer->mData;
+    const float* src = (const float*)inputBuffer->mData;
+    uint32_t frames = inputBuffer->mDataByteSize / (sizeof(float) * g_router.channels);
 
-    if (outOutputData->mNumberBuffers == 1)
+    rb_write(&g_router.ring_buffer, src, frames, g_router.channels);
+    g_router.frames_transferred += frames;
+
+    return noErr;
+}
+
+// 输出回调：从 RingBuffer 取出数据 -> 写入物理设备
+static OSStatus output_callback(AudioDeviceID inDevice, const AudioTimeStamp* inNow, const AudioBufferList* inInputData,
+                                const AudioTimeStamp* inInputTime, AudioBufferList* outOutputData,
+                                const AudioTimeStamp* inOutputTime, void* inClientData)
+{
+    (void)inDevice;
+    (void)inNow;
+    (void)inInputData;
+    (void)inInputTime;
+    (void)inOutputTime;
+    (void)inClientData;
+
+    if (!g_router.is_running || outOutputData->mNumberBuffers == 0)
     {
-        // 4 通道在一个 buffer 里
-        const AudioBuffer* outBuffer = &outOutputData->mBuffers[0];
-        if (outBuffer->mNumberChannels < 4)
-        {
-            return kAudioHardwareUnsupportedOperationError;
-        }
-
-        Float32* out = (Float32*)outBuffer->mData;
-        UInt32 frames = outBuffer->mDataByteSize / (sizeof(Float32) * 4);
-        handle_interleaved_output(in, out, frames);
+        return noErr;
     }
-    else if (outOutputData->mNumberBuffers >= 2)
+
+    AudioBuffer* outputBuffer = &outOutputData->mBuffers[0];
+    if (outputBuffer->mDataByteSize == 0 || outputBuffer->mData == NULL)
     {
-        // 分开的 buffers
-        const AudioBuffer* outBuffer = &outOutputData->mBuffers[1];
-        Float32* out = (Float32*)outBuffer->mData;
-        UInt32 frames = outBuffer->mDataByteSize / (sizeof(Float32) * 2);
-        handle_separated_output(in, out, frames);
+        return noErr;
     }
 
+    float* dst = (float*)outputBuffer->mData;
+    uint32_t frames = outputBuffer->mDataByteSize / (sizeof(float) * g_router.channels);
+
+    rb_read(&g_router.ring_buffer, dst, frames, g_router.channels);
+
+    return noErr;
+}
+
+// ====== 设备查找 ======
+
+static AudioDeviceID find_device_by_uid(const char* uid)
+{
+    AudioObjectPropertyAddress addr = {kAudioHardwarePropertyTranslateUIDToDevice, kAudioObjectPropertyScopeGlobal,
+                                       kAudioObjectPropertyElementMain};
+
+    CFStringRef uidRef = CFStringCreateWithCString(NULL, uid, kCFStringEncodingUTF8);
+    AudioDeviceID deviceID = kAudioObjectUnknown;
+    UInt32 size = sizeof(AudioDeviceID);
+
+    OSStatus status =
+        AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, sizeof(CFStringRef), &uidRef, &size, &deviceID);
+    CFRelease(uidRef);
+
+    if (status != noErr || deviceID == kAudioObjectUnknown)
+    {
+        return kAudioObjectUnknown;
+    }
+
+    return deviceID;
+}
+
+static bool get_device_sample_rate(AudioDeviceID device, uint32_t* sample_rate)
+{
+    AudioObjectPropertyAddress addr = {kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal,
+                                       kAudioObjectPropertyElementMain};
+
+    Float64 rate = 0;
+    UInt32 size = sizeof(rate);
+    OSStatus status = AudioObjectGetPropertyData(device, &addr, 0, NULL, &size, &rate);
+
+    if (status == noErr)
+    {
+        *sample_rate = (uint32_t)rate;
+        return true;
+    }
+
+    return false;
+}
+
+// ====== 公共 API ======
+
+OSStatus audio_router_start(const char* physical_device_uid)
+{
+    if (g_router.is_running)
+    {
+        printf("Router 已在运行\n");
+        return noErr;
+    }
+
+    printf("🔄 启动 Audio Router...\n");
+    printf("   物理设备 UID: %s\n", physical_device_uid);
+
+    // 1. 获取虚拟设备
+    VirtualDeviceInfo vInfo;
+    if (!virtual_device_get_info(&vInfo))
+    {
+        fprintf(stderr, "❌ 未找到虚拟设备\n");
+        return kAudioHardwareNotRunningError;
+    }
+    g_router.input_device = vInfo.deviceId;
+
+    // 2. 获取物理设备
+    g_router.output_device = find_device_by_uid(physical_device_uid);
+    if (g_router.output_device == kAudioObjectUnknown)
+    {
+        fprintf(stderr, "❌ 无法找到物理设备: %s\n", physical_device_uid);
+        return kAudioHardwareBadDeviceError;
+    }
+
+    // 3. 获取音频格式信息
+    uint32_t virtual_rate = 0;
+    uint32_t physical_rate = 0;
+    if (!get_device_sample_rate(g_router.input_device, &virtual_rate))
+    {
+        fprintf(stderr, "⚠️ 无法获取虚拟设备采样率，使用默认 48000\n");
+        virtual_rate = 48000;
+    }
+    if (!get_device_sample_rate(g_router.output_device, &physical_rate))
+    {
+        fprintf(stderr, "⚠️ 无法获取物理设备采样率，使用默认 48000\n");
+        physical_rate = 48000;
+    }
+
+    // 检查采样率是否匹配
+    if (virtual_rate != physical_rate)
+    {
+        fprintf(stderr, "⚠️ 采样率不匹配: 虚拟设备=%u, 物理设备=%u\n", virtual_rate, physical_rate);
+        fprintf(stderr, "   这可能导致音频问题\n");
+    }
+
+    g_router.sample_rate = virtual_rate;
+    g_router.channels = 2; // 假设立体声
+    g_router.bits_per_channel = 32; // Float32
+
+    // 4. 初始化 Ring Buffer
+    rb_init(&g_router.ring_buffer, ROUTER_BUFFER_FRAME_COUNT, g_router.channels);
+
+    // 5. 重置统计
+    g_router.frames_transferred = 0;
+    g_router.underrun_count = 0;
+    g_router.overrun_count = 0;
+
+    // 6. 创建 IO Proc
+    OSStatus status = AudioDeviceCreateIOProcID(g_router.input_device, &input_callback, NULL, &g_router.input_proc_id);
+    if (status != noErr)
+    {
+        fprintf(stderr, "❌ 创建输入 IOProc 失败: %d\n", status);
+        rb_destroy(&g_router.ring_buffer);
+        return status;
+    }
+
+    status = AudioDeviceCreateIOProcID(g_router.output_device, &output_callback, NULL, &g_router.output_proc_id);
+    if (status != noErr)
+    {
+        fprintf(stderr, "❌ 创建输出 IOProc 失败: %d\n", status);
+        AudioDeviceDestroyIOProcID(g_router.input_device, g_router.input_proc_id);
+        rb_destroy(&g_router.ring_buffer);
+        return status;
+    }
+
+    // 7. 启动 IO
+    status = AudioDeviceStart(g_router.input_device, g_router.input_proc_id);
+    if (status != noErr)
+    {
+        fprintf(stderr, "❌ 启动输入设备失败: %d\n", status);
+        goto cleanup;
+    }
+
+    // 等待一点数据积累
+    struct timespec accum_ts = {0, 5000000}; // 5ms
+    nanosleep(&accum_ts, NULL);
+
+    status = AudioDeviceStart(g_router.output_device, g_router.output_proc_id);
+    if (status != noErr)
+    {
+        fprintf(stderr, "❌ 启动输出设备失败: %d\n", status);
+        AudioDeviceStop(g_router.input_device, g_router.input_proc_id);
+        goto cleanup;
+    }
+
+    g_router.is_running = true;
+    printf("✅ Router 已启动\n");
+    printf("   音频流: Virtual Device -> Ring Buffer -> Physical Device\n");
+    printf("   采样率: %u Hz, 通道: %u\n", g_router.sample_rate, g_router.channels);
+
+    return noErr;
+
+cleanup:
+    AudioDeviceDestroyIOProcID(g_router.input_device, g_router.input_proc_id);
+    AudioDeviceDestroyIOProcID(g_router.output_device, g_router.output_proc_id);
+    rb_destroy(&g_router.ring_buffer);
     return status;
 }
 
-static void safe_sleep_ms(long ms)
+void audio_router_stop(void)
 {
-    struct timespec ts;
-    ts.tv_sec = ms / 1000;
-    ts.tv_nsec = (ms % 1000) * 1000000;
-    nanosleep(&ts, NULL);
+    if (!g_router.is_running)
+    {
+        return;
+    }
+
+    printf("⏹️  停止 Audio Router...\n");
+
+    g_router.is_running = false;
+
+    // 停止 IO
+    AudioDeviceStop(g_router.output_device, g_router.output_proc_id);
+    AudioDeviceStop(g_router.input_device, g_router.input_proc_id);
+
+    // 销毁 IO Proc
+    AudioDeviceDestroyIOProcID(g_router.output_device, g_router.output_proc_id);
+    AudioDeviceDestroyIOProcID(g_router.input_device, g_router.input_proc_id);
+
+    // 销毁 Ring Buffer
+    rb_destroy(&g_router.ring_buffer);
+
+    printf("✅ Router 已停止\n");
 }
 
-static bool monitor_router_device(AudioDeviceID aggDevice)
+bool audio_router_is_running(void) { return g_router.is_running; }
+
+bool audio_router_get_physical_device_uid(char* uid, size_t size)
 {
-    int consecutiveErrors = 0;
-
-    while (g_running)
+    if (!g_router.is_running || g_router.output_device == kAudioObjectUnknown)
     {
-        // 检查 Aggregate Device 是否仍然有效且是活动的
-        if (!aggregate_device_is_active())
-        {
-            printf("Router: Aggregate Device became inactive.\n");
-            return false;
-        }
-
-        // 尝试获取设备属性来检测 coreaudiod 是否还活着
-        AudioObjectPropertyAddress addr = {
-            kAudioObjectPropertyName,
-            kAudioObjectPropertyScopeGlobal,
-            kAudioObjectPropertyElementMain
-        };
-        CFStringRef nameRef = NULL;
-        UInt32 dataSize = sizeof(CFStringRef);
-        OSStatus checkStatus = AudioObjectGetPropertyData(aggDevice, &addr, 0, NULL, &dataSize, &nameRef);
-
-        if (checkStatus != noErr)
-        {
-            const int MAX_CONSECUTIVE_ERRORS = 5;
-            consecutiveErrors++;
-            fprintf(stderr, "Router: Warning - cannot communicate with coreaudiod (error %d), attempt %d/%d\n",
-                    checkStatus, consecutiveErrors, MAX_CONSECUTIVE_ERRORS);
-
-            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS)
-            {
-                fprintf(stderr, "Router: coreaudiod appears to be restarting, disconnecting...\n");
-                return false;
-            }
-        }
-        else
-        {
-            if (nameRef) CFRelease(nameRef);
-            consecutiveErrors = 0;
-        }
-
-        sleep(1);
+        return false;
     }
+
+    AudioObjectPropertyAddress addr = {kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+                                       kAudioObjectPropertyElementMain};
+
+    CFStringRef uidRef = NULL;
+    UInt32 dataSize = sizeof(CFStringRef);
+    OSStatus status = AudioObjectGetPropertyData(g_router.output_device, &addr, 0, NULL, &dataSize, &uidRef);
+
+    if (status != noErr || uidRef == NULL)
+    {
+        return false;
+    }
+
+    CFStringGetCString(uidRef, uid, (CFIndex)size, kCFStringEncodingUTF8);
+    CFRelease(uidRef);
+
     return true;
 }
 
-static void attach_and_run_router(AudioDeviceID aggDevice)
+void audio_router_get_stats(uint64_t* frames_transferred, uint32_t* underruns, uint32_t* overruns)
 {
-    AudioDeviceIOProcID ioProcID = NULL;
-    OSStatus status = AudioDeviceCreateIOProcID(aggDevice, &ioProc, NULL, &ioProcID);
-    if (status != noErr)
-    {
-        fprintf(stderr, "Router: CreateIOProc failed: %d. Retrying...\n", status);
-        sleep(2);
-        return;
-    }
-
-    status = AudioDeviceStart(aggDevice, ioProcID);
-    if (status != noErr)
-    {
-        fprintf(stderr, "Router: StartIO failed: %d\n", status);
-        AudioDeviceDestroyIOProcID(aggDevice, ioProcID);
-        sleep(2);
-        return;
-    }
-
-    printf("Router: Routing Active.\n");
-
-    monitor_router_device(aggDevice);
-
-    // 安全地停止和销毁 IOProc
-    printf("Router: Stopping IOProc...\n");
-    OSStatus stopStatus = AudioDeviceStop(aggDevice, ioProcID);
-    if (stopStatus != noErr)
-    {
-        fprintf(stderr, "Router: Warning - AudioDeviceStop returned %d\n", stopStatus);
-    }
-
-    // 添加短暂延迟，确保 coreaudiod 完成清理
-    safe_sleep_ms(100); // 100ms
-
-    OSStatus destroyStatus = AudioDeviceDestroyIOProcID(aggDevice, ioProcID);
-    if (destroyStatus != noErr)
-    {
-        fprintf(stderr, "Router: Warning - AudioDeviceDestroyIOProcID returned %d\n", destroyStatus);
-    }
-}
-
-void start_router_loop(void)
-{
-    signal(SIGTERM, signal_handler);
-    signal(SIGINT, signal_handler);
-    // 忽略 SIGPIPE，防止 coreaudiod 断开时进程崩溃
-    signal(SIGPIPE, SIG_IGN);
-
-    printf("Router: Starting router loop...\n");
-
-    while (g_running)
-    {
-        AggregateDeviceInfo aggInfo;
-        if (!aggregate_device_get_info(&aggInfo) || !aggInfo.isActive)
-        {
-            fprintf(stderr, "Router: Aggregate Device not found or inactive. Retrying in 2s...\n");
-            sleep(2);
-            continue;
-        }
-
-        printf("Router: Attached to Device ID %d\n", aggInfo.deviceId);
-        attach_and_run_router(aggInfo.deviceId);
-
-        if (g_running)
-        {
-            printf("Router: Attempting to restart routing...\n");
-            // 增加等待时间，让 coreaudiod 完全恢复
-            sleep(3);
-        }
-    }
-
-    printf("Router: Stopped.\n");
+    if (frames_transferred)
+        *frames_transferred = g_router.frames_transferred;
+    if (underruns)
+        *underruns = g_router.underrun_count;
+    if (overruns)
+        *overruns = g_router.overrun_count;
 }

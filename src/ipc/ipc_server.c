@@ -5,18 +5,18 @@
 #include "ipc/ipc_server.h"
 #include "ipc/ipc_protocol.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <sys/event.h>
+#include <sys/socket.h>
 #include <sys/time.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <limits.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 // 客户端连接结构
 typedef struct ClientConnection
@@ -50,7 +50,8 @@ static uint64_t get_timestamp_ms(void)
 static int set_nonblocking(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1) return -1;
+    if (flags == -1)
+        return -1;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
@@ -58,7 +59,8 @@ static int set_nonblocking(int fd)
 static int add_connection(int fd, pid_t pid)
 {
     ClientConnection* conn = malloc(sizeof(ClientConnection));
-    if (conn == NULL) return -1;
+    if (conn == NULL)
+        return -1;
 
     conn->fd = fd;
     conn->pid = pid;
@@ -102,8 +104,7 @@ IPCClientEntry* ipc_server_find_client(IPCServerContext* ctx, pid_t pid)
 }
 
 // 注册新客户端
-int ipc_server_register_client(IPCServerContext* ctx, pid_t pid, float volume,
-                               bool muted, const char* app_name)
+int ipc_server_register_client(IPCServerContext* ctx, pid_t pid, float volume, bool muted, const char* app_name)
 {
     // 检查是否已存在
     if (ipc_server_find_client(ctx, pid) != NULL)
@@ -112,7 +113,8 @@ int ipc_server_register_client(IPCServerContext* ctx, pid_t pid, float volume,
     }
 
     IPCClientEntry* entry = malloc(sizeof(IPCClientEntry));
-    if (entry == NULL) return -1;
+    if (entry == NULL)
+        return -1;
 
     entry->pid = pid;
     entry->volume = volume;
@@ -150,11 +152,14 @@ int ipc_server_unregister_client(IPCServerContext* ctx, pid_t pid)
 // 设置客户端音量
 int ipc_server_set_volume(IPCServerContext* ctx, pid_t pid, float volume)
 {
-    if (volume < 0.0f) volume = 0.0f;
-    if (volume > 1.0f) volume = 1.0f;
+    if (volume < 0.0f)
+        volume = 0.0f;
+    if (volume > 1.0f)
+        volume = 1.0f;
 
     IPCClientEntry* client = ipc_server_find_client(ctx, pid);
-    if (client == NULL) return -1;
+    if (client == NULL)
+        return -1;
 
     client->volume = volume;
     return 0;
@@ -164,10 +169,13 @@ int ipc_server_set_volume(IPCServerContext* ctx, pid_t pid, float volume)
 int ipc_server_get_volume(IPCServerContext* ctx, pid_t pid, float* volume, bool* muted)
 {
     const IPCClientEntry* client = ipc_server_find_client(ctx, pid);
-    if (client == NULL) return -1;
+    if (client == NULL)
+        return -1;
 
-    if (volume != NULL) *volume = client->volume;
-    if (muted != NULL) *muted = client->muted;
+    if (volume != NULL)
+        *volume = client->volume;
+    if (muted != NULL)
+        *muted = client->muted;
     return 0;
 }
 
@@ -175,22 +183,57 @@ int ipc_server_get_volume(IPCServerContext* ctx, pid_t pid, float* volume, bool*
 int ipc_server_set_mute(IPCServerContext* ctx, pid_t pid, bool muted)
 {
     IPCClientEntry* client = ipc_server_find_client(ctx, pid);
-    if (client == NULL) return -1;
+    if (client == NULL)
+        return -1;
 
     client->muted = muted;
     return 0;
 }
 
 // 获取客户端数量
-uint32_t ipc_server_get_client_count(IPCServerContext* ctx)
+uint32_t ipc_server_get_client_count(IPCServerContext* ctx) { return ctx->client_count; }
+
+// 获取所有客户端列表
+IPCClientEntry* ipc_server_list_clients(IPCServerContext* ctx, uint32_t* count)
 {
-    return ctx->client_count;
+    if (ctx == NULL || count == NULL)
+    {
+        return NULL;
+    }
+
+    *count = ctx->client_count;
+    if (*count == 0)
+    {
+        return NULL;
+    }
+
+    // 分配数组内存
+    IPCClientEntry* list = malloc(sizeof(IPCClientEntry) * (*count));
+    if (list == NULL)
+    {
+        *count = 0;
+        return NULL;
+    }
+
+    // 复制客户端信息到数组
+    uint32_t i = 0;
+    IPCClientEntry* current = ctx->clients;
+    while (current != NULL && i < *count)
+    {
+        memcpy(&list[i], current, sizeof(IPCClientEntry));
+        list[i].next = NULL; // 数组中不需要链表指针
+        i++;
+        current = current->next;
+    }
+
+    return list;
 }
 
 // 初始化服务端
 int ipc_server_init(IPCServerContext* ctx)
 {
-    if (ctx == NULL) return -1;
+    if (ctx == NULL)
+        return -1;
 
     memset(ctx, 0, sizeof(IPCServerContext));
 
@@ -314,12 +357,12 @@ static void handle_new_connection(IPCServerContext* ctx)
 }
 
 // 发送响应
-static int send_response(int fd, uint32_t request_id, int32_t status,
-                         const void* data, uint32_t data_len)
+static int send_response(int fd, uint32_t request_id, int32_t status, const void* data, uint32_t data_len)
 {
     uint32_t total_len = sizeof(IPCMessageHeader) + sizeof(IPCResponse) + data_len;
     uint8_t* buffer = malloc(total_len);
-    if (buffer == NULL) return -1;
+    if (buffer == NULL)
+        return -1;
 
     IPCMessageHeader* header = (IPCMessageHeader*)buffer;
     ipc_init_header(header, kIPCCommandResponse, sizeof(IPCResponse) + data_len, request_id);
@@ -384,7 +427,8 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
 
     // 处理指令
     int32_t status = kIPCStatusOK;
-    const void* response_data = NULL;
+    void* response_data = NULL;
+    bool response_needs_free = false;
     uint32_t response_len = 0;
     IPCVolumeResponse vol_resp = {0}; // 提升作用域以修复 line 503
 
@@ -396,8 +440,7 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
             {
                 const IPCRegisterRequest* req = (const IPCRegisterRequest*)payload;
                 const char* app_name = (const char*)(payload + sizeof(IPCRegisterRequest));
-                status = ipc_server_register_client(ctx, req->pid, req->initial_volume,
-                                                    req->muted, app_name);
+                status = ipc_server_register_client(ctx, req->pid, req->initial_volume, req->muted, app_name);
             }
             else
             {
@@ -412,7 +455,8 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
             {
                 const pid_t* pid = (const pid_t*)payload;
                 status = ipc_server_unregister_client(ctx, *pid);
-                if (status != 0) status = kIPCStatusClientNotFound;
+                if (status != 0)
+                    status = kIPCStatusClientNotFound;
             }
             else
             {
@@ -455,7 +499,8 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
             {
                 const IPCSetVolumeRequest* req = (const IPCSetVolumeRequest*)payload;
                 status = ipc_server_set_volume(ctx, req->pid, req->volume);
-                if (status != 0) status = kIPCStatusClientNotFound;
+                if (status != 0)
+                    status = kIPCStatusClientNotFound;
             }
             else
             {
@@ -470,7 +515,8 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
             {
                 const IPCSetMuteRequest* req = (const IPCSetMuteRequest*)payload;
                 status = ipc_server_set_mute(ctx, req->pid, req->muted);
-                if (status != 0) status = kIPCStatusClientNotFound;
+                if (status != 0)
+                    status = kIPCStatusClientNotFound;
             }
             else
             {
@@ -480,9 +526,63 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
         }
 
     case kIPCCommandPing:
-    case kIPCCommandListClients:
         {
             status = kIPCStatusOK;
+            break;
+        }
+
+    case kIPCCommandListClients:
+        {
+            uint32_t client_count = 0;
+            IPCClientEntry* clients = ipc_server_list_clients(ctx, &client_count);
+
+            if (clients == NULL || client_count == 0)
+            {
+                // 没有客户端，返回空列表
+                status = kIPCStatusOK;
+                response_len = 0;
+                response_data = NULL;
+                break;
+            }
+
+            // 计算需要的缓冲区大小：每个客户端的信息（不包含next指针）
+            size_t entry_size = sizeof(pid_t) + sizeof(float) + sizeof(bool) + sizeof(uint64_t) + 256;
+            response_len = (uint32_t)(entry_size * client_count);
+            response_data = malloc(response_len);
+            response_needs_free = (response_data != NULL);
+
+            if (response_data == NULL)
+            {
+                status = kIPCStatusInternalError;
+                free(clients);
+                break;
+            }
+
+            uint8_t* ptr = (uint8_t*)response_data;
+            for (uint32_t i = 0; i < client_count; i++)
+            {
+                // 写入 PID
+                memcpy(ptr, &clients[i].pid, sizeof(pid_t));
+                ptr += sizeof(pid_t);
+
+                // 写入音量
+                memcpy(ptr, &clients[i].volume, sizeof(float));
+                ptr += sizeof(float);
+
+                // 写入静音状态
+                memcpy(ptr, &clients[i].muted, sizeof(bool));
+                ptr += sizeof(bool);
+
+                // 写入连接时间
+                memcpy(ptr, &clients[i].connected_at, sizeof(uint64_t));
+                ptr += sizeof(uint64_t);
+
+                // 写入应用名称（固定256字节）
+                memcpy(ptr, clients[i].app_name, 256);
+                ptr += 256;
+            }
+            status = kIPCStatusOK;
+            free(clients);
             break;
         }
 
@@ -492,13 +592,16 @@ static void handle_client_message(IPCServerContext* ctx, int client_fd)
     }
 
     send_response(client_fd, header.request_id, status, response_data, response_len);
+    if (response_needs_free)
+        free(response_data);
     free(payload);
 }
 
 // 运行服务端主循环
 void ipc_server_run(IPCServerContext* ctx)
 {
-    if (ctx == NULL || ctx->epoll_fd < 0) return;
+    if (ctx == NULL || ctx->epoll_fd < 0)
+        return;
 
     struct kevent events[32];
     struct timespec timeout;
@@ -512,7 +615,8 @@ void ipc_server_run(IPCServerContext* ctx)
 
         if (nfds < 0)
         {
-            if (errno == EINTR) continue;
+            if (errno == EINTR)
+                continue;
             perror("kevent");
             break;
         }
@@ -545,7 +649,8 @@ void ipc_server_stop(IPCServerContext* ctx)
 // 清理服务端资源
 void ipc_server_cleanup(IPCServerContext* ctx)
 {
-    if (ctx == NULL) return;
+    if (ctx == NULL)
+        return;
 
     // 关闭所有连接
     while (g_connections != NULL)
