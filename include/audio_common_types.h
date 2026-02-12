@@ -22,19 +22,19 @@
 // 保持 4 字节对齐
 typedef struct
 {
-    pid_t pid; // 进程 ID
-    Float32 volume; // 音量 (0.0 - 1.0)
-    UInt32 isMuted; // 是否静音 (1=true, 0=false)
-    UInt32 isActive; // 是否活跃 (预留)
-    char bundleId[128]; // Bundle ID (例如 "com.google.Chrome")
+  pid_t pid;	      // 进程 ID
+  Float32 volume;     // 音量 (0.0 - 1.0)
+  UInt32 isMuted;     // 是否静音 (1=true, 0=false)
+  UInt32 isActive;    // 是否活跃 (预留)
+  char bundleId[128]; // Bundle ID (例如 "com.google.Chrome")
 } AppVolumeEntry;
 
 // 音量表（通过 CoreAudio 属性传输的完整数据块）
 typedef struct
 {
-    UInt32 count;
-    UInt32 reserved; // 填充对齐
-    AppVolumeEntry entries[MAX_APP_ENTRIES];
+  UInt32 count;
+  UInt32 reserved; // 填充对齐
+  AppVolumeEntry entries[MAX_APP_ENTRIES];
 } AppVolumeTable;
 
 #endif // AUDIO_COMMON_TYPES_H

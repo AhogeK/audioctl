@@ -18,33 +18,33 @@
 // 环形缓冲区结构
 typedef struct
 {
-    float* buffer;
-    uint32_t capacity;
-    atomic_uint write_pos;
-    atomic_uint read_pos;
+  float *buffer;
+  uint32_t capacity;
+  atomic_uint write_pos;
+  atomic_uint read_pos;
 } RouterRingBuffer;
 
 // Router 上下文
 typedef struct
 {
-    AudioDeviceID input_device; // 虚拟设备 (Source)
-    AudioDeviceID output_device; // 物理设备 (Sink)
+  AudioDeviceID input_device;  // 虚拟设备 (Source)
+  AudioDeviceID output_device; // 物理设备 (Sink)
 
-    AudioDeviceIOProcID input_proc_id;
-    AudioDeviceIOProcID output_proc_id;
+  AudioDeviceIOProcID input_proc_id;
+  AudioDeviceIOProcID output_proc_id;
 
-    RouterRingBuffer ring_buffer;
-    bool is_running;
+  RouterRingBuffer ring_buffer;
+  bool is_running;
 
-    // 音频格式信息
-    uint32_t sample_rate;
-    uint32_t channels;
-    uint32_t bits_per_channel;
+  // 音频格式信息
+  uint32_t sample_rate;
+  uint32_t channels;
+  uint32_t bits_per_channel;
 
-    // 统计信息
-    uint64_t frames_transferred;
-    uint32_t underrun_count;
-    uint32_t overrun_count;
+  // 统计信息
+  uint64_t frames_transferred;
+  uint32_t underrun_count;
+  uint32_t overrun_count;
 } AudioRouterContext;
 
 /**
@@ -53,17 +53,20 @@ typedef struct
  * @param physical_device_uid 目标物理设备的 UID
  * @return OSStatus 操作状态
  */
-OSStatus audio_router_start(const char* physical_device_uid);
+OSStatus
+audio_router_start (const char *physical_device_uid);
 
 /**
  * 停止路由
  */
-void audio_router_stop(void);
+void
+audio_router_stop (void);
 
 /**
  * 检查 Router 是否正在运行
  */
-bool audio_router_is_running(void);
+bool
+audio_router_is_running (void);
 
 /**
  * 获取当前绑定的物理设备 UID
@@ -73,7 +76,8 @@ bool audio_router_is_running(void);
  * @param size 缓冲区大小
  * @return 成功返回 true
  */
-bool audio_router_get_physical_device_uid(char* uid, size_t size);
+bool
+audio_router_get_physical_device_uid (char *uid, size_t size);
 
 /**
  * 获取 Router 统计信息
@@ -82,6 +86,8 @@ bool audio_router_get_physical_device_uid(char* uid, size_t size);
  * @param underruns 欠载次数
  * @param overruns 过载次数
  */
-void audio_router_get_stats(uint64_t* frames_transferred, uint32_t* underruns, uint32_t* overruns);
+void
+audio_router_get_stats (uint64_t *frames_transferred, uint32_t *underruns,
+			uint32_t *overruns);
 
 #endif // AUDIOCTL_AUDIO_ROUTER_H

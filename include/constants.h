@@ -44,7 +44,8 @@
  * @param path_size 缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int get_support_directory(char* path, size_t path_size);
+int
+get_support_directory (char *path, size_t path_size);
 
 /**
  * 获取 PID 文件完整路径
@@ -53,7 +54,8 @@ int get_support_directory(char* path, size_t path_size);
  * @param path_size 缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int get_pid_file_path(char* path, size_t path_size);
+int
+get_pid_file_path (char *path, size_t path_size);
 
 /**
  * 获取日志文件完整路径
@@ -62,7 +64,8 @@ int get_pid_file_path(char* path, size_t path_size);
  * @param path_size 缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int get_log_file_path(char* path, size_t path_size);
+int
+get_log_file_path (char *path, size_t path_size);
 
 /**
  * 获取锁文件完整路径
@@ -71,6 +74,7 @@ int get_log_file_path(char* path, size_t path_size);
  * @param path_size 缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int get_lock_file_path(char* path, size_t path_size);
+int
+get_lock_file_path (char *path, size_t path_size);
 
-#endif //AUDIOCTL_CONSTANTS_H
+#endif // AUDIOCTL_CONSTANTS_H

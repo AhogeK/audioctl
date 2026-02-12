@@ -9,11 +9,11 @@
 
 typedef struct
 {
-    char bundleId[256]; // 应用程序包标识符
-    char name[256]; // 应用程序名称
-    Float32 volume; // 音量 (0.0 - 1.0)
-    pid_t pid; // 进程ID
-    AudioDeviceID deviceId; // 使用的设备ID
+  char bundleId[256];	  // 应用程序包标识符
+  char name[256];	  // 应用程序名称
+  Float32 volume;	  // 音量 (0.0 - 1.0)
+  pid_t pid;		  // 进程ID
+  AudioDeviceID deviceId; // 使用的设备ID
 } AudioAppInfo;
 
 /**
@@ -38,9 +38,11 @@ typedef struct
  * @param appCount 输出参数，返回应用数量
  * @return OSStatus 操作状态
  */
-OSStatus getAudioApps(AudioAppInfo * *apps, UInt32 * appCount);
+OSStatus
+getAudioApps (AudioAppInfo **apps, UInt32 *appCount);
 
 // 释放应用程序列表内存
-void freeAudioApps(AudioAppInfo* apps);
+void
+freeAudioApps (AudioAppInfo *apps);
 
-#endif //AUDIO_APPS_H
+#endif // AUDIO_APPS_H

@@ -26,14 +26,16 @@
  *
  * @return OSStatus 操作状态
  */
-OSStatus aggregate_volume_proxy_start(void);
+OSStatus
+aggregate_volume_proxy_start (void);
 
 /**
  * 停止 Aggregate Device 音量代理
  *
  * 清理资源，注销监听器，停止后台线程。
  */
-void aggregate_volume_proxy_stop(void);
+void
+aggregate_volume_proxy_stop (void);
 
 #pragma mark - 音量控制
 
@@ -45,7 +47,8 @@ void aggregate_volume_proxy_stop(void);
  * @param outVolume 输出音量值（0.0 - 1.0）
  * @return OSStatus 操作状态
  */
-OSStatus aggregate_volume_get(Float32* outVolume);
+OSStatus
+aggregate_volume_get (Float32 *outVolume);
 
 /**
  * 设置 Aggregate Device 音量
@@ -55,7 +58,8 @@ OSStatus aggregate_volume_get(Float32* outVolume);
  * @param volume 音量值（0.0 - 1.0）
  * @return OSStatus 操作状态
  */
-OSStatus aggregate_volume_set(Float32 volume);
+OSStatus
+aggregate_volume_set (Float32 volume);
 
 /**
  * 获取 Aggregate Device 静音状态
@@ -63,7 +67,8 @@ OSStatus aggregate_volume_set(Float32 volume);
  * @param outIsMuted 输出静音状态
  * @return OSStatus 操作状态
  */
-OSStatus aggregate_volume_get_mute(bool* outIsMuted);
+OSStatus
+aggregate_volume_get_mute (bool *outIsMuted);
 
 /**
  * 设置 Aggregate Device 静音状态
@@ -71,18 +76,21 @@ OSStatus aggregate_volume_get_mute(bool* outIsMuted);
  * @param isMuted 静音状态
  * @return OSStatus 操作状态
  */
-OSStatus aggregate_volume_set_mute(bool isMuted);
+OSStatus
+aggregate_volume_set_mute (bool isMuted);
 
 #pragma mark - 状态查询
 
 /**
  * 检查音量代理是否正在运行
  */
-bool aggregate_volume_proxy_is_running(void);
+bool
+aggregate_volume_proxy_is_running (void);
 
 /**
  * 获取当前绑定的物理设备音量（用于调试）
  */
-OSStatus aggregate_volume_get_physical_device_volume(Float32* outVolume);
+OSStatus
+aggregate_volume_get_physical_device_volume (Float32 *outVolume);
 
 #endif // AUDIOCTL_AGGREGATE_VOLUME_PROXY_H

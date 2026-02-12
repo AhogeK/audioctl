@@ -20,15 +20,15 @@ extern "C" {
 
 typedef struct IPCClientContext
 {
-    int fd; // Socket 文件描述符
-    bool connected; // 连接状态
-    uint64_t last_activity; // 最后活动时间戳
-    int reconnect_attempts; // 重连尝试次数
-    pid_t cached_pid; // 缓存的 PID（用于驱动快速查询）
-    float cached_volume; // 缓存的音量值
-    bool cached_muted; // 缓存的静音状态
-    uint64_t cache_timestamp; // 缓存时间戳
-    bool cache_valid; // 缓存是否有效
+  int fd;		    // Socket 文件描述符
+  bool connected;	    // 连接状态
+  uint64_t last_activity;   // 最后活动时间戳
+  int reconnect_attempts;   // 重连尝试次数
+  pid_t cached_pid;	    // 缓存的 PID（用于驱动快速查询）
+  float cached_volume;	    // 缓存的音量值
+  bool cached_muted;	    // 缓存的静音状态
+  uint64_t cache_timestamp; // 缓存时间戳
+  bool cache_valid;	    // 缓存是否有效
 } IPCClientContext;
 
 // ============================================================================
@@ -41,7 +41,8 @@ typedef struct IPCClientContext
  * @param ctx 客户端上下文指针
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_init(IPCClientContext* ctx);
+int
+ipc_client_init (IPCClientContext *ctx);
 
 /**
  * 连接到 IPC 服务端
@@ -49,21 +50,24 @@ int ipc_client_init(IPCClientContext* ctx);
  * @param ctx 客户端上下文指针
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_connect(IPCClientContext* ctx);
+int
+ipc_client_connect (IPCClientContext *ctx);
 
 /**
  * 断开与服务端的连接
  *
  * @param ctx 客户端上下文指针
  */
-void ipc_client_disconnect(IPCClientContext* ctx);
+void
+ipc_client_disconnect (IPCClientContext *ctx);
 
 /**
  * 清理客户端资源
  *
  * @param ctx 客户端上下文指针
  */
-void ipc_client_cleanup(IPCClientContext* ctx);
+void
+ipc_client_cleanup (IPCClientContext *ctx);
 
 /**
  * 检查是否已连接
@@ -71,7 +75,8 @@ void ipc_client_cleanup(IPCClientContext* ctx);
  * @param ctx 客户端上下文指针
  * @return 已连接返回 true，否则返回 false
  */
-bool ipc_client_is_connected(IPCClientContext* ctx);
+bool
+ipc_client_is_connected (IPCClientContext *ctx);
 
 /**
  * 发送消息到服务端
@@ -81,7 +86,9 @@ bool ipc_client_is_connected(IPCClientContext* ctx);
  * @param payload 消息负载（可为 NULL）
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_send(IPCClientContext* ctx, const IPCMessageHeader* header, const void* payload);
+int
+ipc_client_send (IPCClientContext *ctx, const IPCMessageHeader *header,
+		 const void *payload);
 
 /**
  * 接收服务端响应
@@ -92,7 +99,9 @@ int ipc_client_send(IPCClientContext* ctx, const IPCMessageHeader* header, const
  * @param payload_size 缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_recv(IPCClientContext* ctx, IPCMessageHeader* header, void* payload, size_t payload_size);
+int
+ipc_client_recv (IPCClientContext *ctx, IPCMessageHeader *header, void *payload,
+		 size_t payload_size);
 
 /**
  * 发送请求并等待响应（同步调用）
@@ -105,8 +114,12 @@ int ipc_client_recv(IPCClientContext* ctx, IPCMessageHeader* header, void* paylo
  * @param response_size 响应缓冲区大小
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_send_sync(IPCClientContext* ctx, const IPCMessageHeader* request_header, const void* request_payload,
-                         IPCMessageHeader* response_header, void* response_payload, size_t response_size);
+int
+ipc_client_send_sync (IPCClientContext *ctx,
+		      const IPCMessageHeader *request_header,
+		      const void *request_payload,
+		      IPCMessageHeader *response_header, void *response_payload,
+		      size_t response_size);
 
 // ============================================================================
 // 驱动专用快速查询 API（带原子缓存）
@@ -122,7 +135,9 @@ int ipc_client_send_sync(IPCClientContext* ctx, const IPCMessageHeader* request_
  * @param muted 输出静音状态
  * @return 成功返回 0，失败返回 -1（使用缓存值）
  */
-int ipc_client_get_volume_fast(IPCClientContext* ctx, pid_t pid, float* volume, bool* muted);
+int
+ipc_client_get_volume_fast (IPCClientContext *ctx, pid_t pid, float *volume,
+			    bool *muted);
 
 /**
  * 更新本地缓存
@@ -132,7 +147,8 @@ int ipc_client_get_volume_fast(IPCClientContext* ctx, pid_t pid, float* volume, 
  * @param pid 目标应用 PID
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_refresh_cache(IPCClientContext* ctx, pid_t pid);
+int
+ipc_client_refresh_cache (IPCClientContext *ctx, pid_t pid);
 
 /**
  * 设置本地缓存值（用于驱动初始化）
@@ -142,7 +158,9 @@ int ipc_client_refresh_cache(IPCClientContext* ctx, pid_t pid);
  * @param volume 音量值
  * @param muted 静音状态
  */
-void ipc_client_set_cache(IPCClientContext* ctx, pid_t pid, float volume, bool muted);
+void
+ipc_client_set_cache (IPCClientContext *ctx, pid_t pid, float volume,
+		      bool muted);
 
 // ============================================================================
 // 高级 API - 应用管理
@@ -158,7 +176,9 @@ void ipc_client_set_cache(IPCClientContext* ctx, pid_t pid, float volume, bool m
  * @param muted 初始静音状态
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_name, float initial_volume, bool muted);
+int
+ipc_client_register_app (IPCClientContext *ctx, pid_t pid, const char *app_name,
+			 float initial_volume, bool muted);
 
 /**
  * 注销应用
@@ -167,7 +187,8 @@ int ipc_client_register_app(IPCClientContext* ctx, pid_t pid, const char* app_na
  * @param pid 应用进程ID
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_unregister_app(IPCClientContext* ctx, pid_t pid);
+int
+ipc_client_unregister_app (IPCClientContext *ctx, pid_t pid);
 
 /**
  * 获取应用音量
@@ -178,7 +199,9 @@ int ipc_client_unregister_app(IPCClientContext* ctx, pid_t pid);
  * @param muted 输出静音状态
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_get_app_volume(IPCClientContext* ctx, pid_t pid, float* volume, bool* muted);
+int
+ipc_client_get_app_volume (IPCClientContext *ctx, pid_t pid, float *volume,
+			   bool *muted);
 
 /**
  * 设置应用音量
@@ -188,7 +211,8 @@ int ipc_client_get_app_volume(IPCClientContext* ctx, pid_t pid, float* volume, b
  * @param volume 音量值
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_set_app_volume(IPCClientContext* ctx, pid_t pid, float volume);
+int
+ipc_client_set_app_volume (IPCClientContext *ctx, pid_t pid, float volume);
 
 /**
  * 设置应用静音状态
@@ -198,7 +222,8 @@ int ipc_client_set_app_volume(IPCClientContext* ctx, pid_t pid, float volume);
  * @param muted 静音状态
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_set_app_mute(IPCClientContext* ctx, pid_t pid, bool muted);
+int
+ipc_client_set_app_mute (IPCClientContext *ctx, pid_t pid, bool muted);
 
 /**
  * Ping 服务端（保活检测）
@@ -206,7 +231,8 @@ int ipc_client_set_app_mute(IPCClientContext* ctx, pid_t pid, bool muted);
  * @param ctx 客户端上下文指针
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_ping(IPCClientContext* ctx);
+int
+ipc_client_ping (IPCClientContext *ctx);
 
 // ============================================================================
 // 应用列表查询
@@ -217,11 +243,11 @@ int ipc_client_ping(IPCClientContext* ctx);
  */
 typedef struct IPCAppInfo
 {
-    pid_t pid; // 进程ID
-    float volume; // 当前音量 (0.0 - 1.0)
-    bool muted; // 静音状态
-    uint64_t connected_at; // 连接时间戳
-    char app_name[256]; // 应用名称
+  pid_t pid;		 // 进程ID
+  float volume;		 // 当前音量 (0.0 - 1.0)
+  bool muted;		 // 静音状态
+  uint64_t connected_at; // 连接时间戳
+  char app_name[256];	 // 应用名称
 } IPCAppInfo;
 
 /**
@@ -232,7 +258,9 @@ typedef struct IPCAppInfo
  * @param count 输出应用数量
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_list_apps(IPCClientContext* ctx, IPCAppInfo** apps, uint32_t* count);
+int
+ipc_client_list_apps (IPCClientContext *ctx, IPCAppInfo **apps,
+		      uint32_t *count);
 
 // ============================================================================
 // 自动重连机制
@@ -245,7 +273,8 @@ int ipc_client_list_apps(IPCClientContext* ctx, IPCAppInfo** apps, uint32_t* cou
  * @param ctx 客户端上下文指针
  * @return 成功返回 0，失败返回 -1
  */
-int ipc_client_reconnect(IPCClientContext* ctx);
+int
+ipc_client_reconnect (IPCClientContext *ctx);
 
 /**
  * 检查是否需要重连
@@ -253,14 +282,16 @@ int ipc_client_reconnect(IPCClientContext* ctx);
  * @param ctx 客户端上下文指针
  * @return 需要重连返回 true，否则返回 false
  */
-bool ipc_client_should_reconnect(IPCClientContext* ctx);
+bool
+ipc_client_should_reconnect (IPCClientContext *ctx);
 
 /**
  * 重置重连计数器
  *
  * @param ctx 客户端上下文指针
  */
-void ipc_client_reset_reconnect(IPCClientContext* ctx);
+void
+ipc_client_reset_reconnect (IPCClientContext *ctx);
 
 #ifdef __cplusplus
 }

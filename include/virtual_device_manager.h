@@ -13,11 +13,11 @@
 // 虚拟设备信息
 typedef struct
 {
-    AudioDeviceID deviceId;
-    bool isInstalled;
-    bool isActive;
-    char name[256];
-    char uid[256];
+  AudioDeviceID deviceId;
+  bool isInstalled;
+  bool isActive;
+  char name[256];
+  char uid[256];
 } VirtualDeviceInfo;
 
 // 虚拟设备的UID（与驱动中定义的一致）
@@ -28,56 +28,70 @@ typedef struct
 
 // 检测虚拟设备是否安装
 // 通过查找具有特定UID的设备来判断
-bool virtual_device_is_installed(void);
+bool
+virtual_device_is_installed (void);
 
 // 获取虚拟设备信息
 // 返回 true 表示找到了虚拟设备
-bool virtual_device_get_info(VirtualDeviceInfo* outInfo);
+bool
+virtual_device_get_info (VirtualDeviceInfo *outInfo);
 
 // 检测虚拟设备是否正在作为默认输出设备使用
-bool virtual_device_is_active_output(void);
+bool
+virtual_device_is_active_output (void);
 
 // 检测虚拟设备是否正在作为默认输入设备使用
-bool virtual_device_is_active_input(void);
+bool
+virtual_device_is_active_input (void);
 
 // 检测虚拟设备是否正在使用（输入或输出）
-bool virtual_device_is_active(void);
+bool
+virtual_device_is_active (void);
 
 #pragma mark - 设备控制
 
 // 将虚拟设备设为默认输出设备
 // 返回 noErr 表示成功
-OSStatus virtual_device_set_as_default_output(void);
+OSStatus
+virtual_device_set_as_default_output (void);
 
 // 将虚拟设备设为默认输入设备
-OSStatus virtual_device_set_as_default_input(void);
+OSStatus
+virtual_device_set_as_default_input (void);
 
 // 切换到虚拟设备（同时设为默认输入和输出）
-OSStatus virtual_device_activate(void);
+OSStatus
+virtual_device_activate (void);
 
 // 【新架构】激活虚拟设备并启动 Router（串联模式）
 // App -> Virtual Device -> Router -> Physical Device
-OSStatus virtual_device_activate_with_router(void);
+OSStatus
+virtual_device_activate_with_router (void);
 
 // 恢复到物理设备（查找第一个非虚拟设备设为默认）
-OSStatus virtual_device_deactivate(void);
+OSStatus
+virtual_device_deactivate (void);
 
 #pragma mark - 状态报告
 
 // 打印虚拟设备状态信息
-void virtual_device_print_status(void);
+void
+virtual_device_print_status (void);
 
 // 获取当前默认输出设备的信息
-OSStatus virtual_device_get_current_output_info(VirtualDeviceInfo* outInfo);
+OSStatus
+virtual_device_get_current_output_info (VirtualDeviceInfo *outInfo);
 
 #pragma mark - 应用音量控制前置检查
 
 // 检查是否可以进行应用音量控制
 // 返回 true 表示虚拟设备已安装且正在使用，可以进行应用音量控制
-bool virtual_device_can_control_app_volume(void);
+bool
+virtual_device_can_control_app_volume (void);
 
 // 获取应用音量控制的可用性描述
 // 返回一个描述字符串，说明为什么可以或不可以进行应用音量控制
-const char* virtual_device_get_app_volume_status(void);
+const char *
+virtual_device_get_app_volume_status (void);
 
 #endif // AUDIOCTL_VIRTUAL_DEVICE_MANAGER_H
