@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md"
+  ],
+  "agents": {
+    "audio_architect": {
+      "permissions": {
+        "run_command": "ask",
+        "write_file": "allow"
+      }
+    }
+  }
+}
