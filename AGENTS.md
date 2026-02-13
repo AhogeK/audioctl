@@ -31,19 +31,21 @@
 
 ---
 
-## ☁️ 云端操作权限（Human-only）
+## ☁️ 云端与版本控制权限（Human-only）
 
-本项目中，涉及远端仓库或云平台的操作必须由**人类**执行，AI 不得代为完成或自动化触发，包括但不限于：
+本项目中，涉及版本控制（Git）与云平台的操作必须严格由**人类**执行。AI **严禁**擅自执行以下命令：
 
-- `git commit` / `git push` / `git pull --rebase` / `git merge`
+- `git commit` (严禁！即使是本地提交)
+- `git push`
+- `git pull` / `git merge` / `git rebase`
 - 创建或更新 PR（GitHub/GitLab 等）
-- 任何需要上传、发布、同步到远端的动作
 
-AI 的职责是：
+### AI 的正确交付姿势
 
-- 在每个“可提交的小步骤”完成后，生成清晰的变更说明与测试清单
-- 停下并询问人类是否执行测试、是否提交、提交信息如何写
-- 若需要拉取远端更新，明确提醒人类先完成同步，再继续开发
+1. **代码清理**: 在任务完成后，AI 应主动清理调试代码（如 `printf`, `os_log` 调试信息）、临时文件与注释。
+2. **状态检查**: 运行 `git status` 告知用户哪些文件已修改。
+3. **提交建议**: 生成推荐的 Commit Message 供用户参考，**但绝不执行 commit 命令**。
+4. **等待指令**: 除非用户明确发出指令（如“请帮我提交代码”），否则 AI 必须停在 `git add` 之前或之后，把提交权交给人类。
 
 ## ⛳ 小步提交确认（Checkpoint Gate）
 
@@ -90,7 +92,8 @@ AI 的职责是：
 ## 🛡️ 通用开发红线
 
 * **格式化约束**: 提交任何代码前必须符合 LLVM 风格（强制依赖 `clang-format` 自动化对齐）。
-* **实时性约束**: 在 `AudioDeviceIOProc` 回调中**绝对禁止**内存分配（`malloc`/`new`）与阻塞性锁操作（应使用无锁数据结构或 Atomics）。
+* **实时性约束**: 在 `AudioDeviceIOProc` 回调中**绝对禁止**内存分配（`malloc`/`new`）与阻塞性锁操作（应使用无锁数据结构或
+  Atomics）。
 * **生态纯洁性**: 严禁引入 Web 技术栈（如 Electron、Tauri 等），坚持 macOS 极致原生性能与体验。
 
 ---
@@ -98,16 +101,19 @@ AI 的职责是：
 ## 🎯 AI 与人类职责分工
 
 ### AI 职责（我）
+
 1. **编译检查**: 确保代码能编译通过
 2. **单测运行**: 确保单元测试通过
 3. **日志分析**: 当用户测试出现问题时，负责查看日志分析原因
 
 ### 人类职责（你）
+
 1. **实际安装**: 运行 `./scripts/install.sh install`（注意：必须重启 coreaudiod）
 2. **实际测试**: 切换设备、播放音频等实际操作
 3. **问题反馈**: 告诉 AI 出现了什么问题（如"没声音"）
 
 ### 关键提醒
+
 - **安装必须重启 coreaudiod**: 不能使用 `--no-coreaudio-restart`，否则新代码不会生效
 - 安装后需要手动重启 coreaudiod 或等待系统加载新驱动
 
@@ -118,23 +124,28 @@ AI 的职责是：
 当用户测试出现问题时，AI 需要按以下步骤查看日志：
 
 ### 1. 查看 coreaudiod 中的错误
+
 ```bash
 /usr/bin/log show --predicate 'process == "coreaudiod"' --last 30s 2>&1 | grep -iE "timestamp|VADriver|anchor|sample" | tail -20
 ```
 
 ### 2. 查看驱动调试日志（需要 sudo）
+
 ```bash
 sudo log show --predicate 'message contains "GetZTS"' --last 30s 2>&1 | head -10
 ```
+
 （"GetZTS" 是自定义的日志关键词，可在代码中修改）
 
 ### 3. 关键指标解读
+
 - `sample diff: 1024` = 时间戳跳跃了 2 个周期（应该 512）
 - `cycle=1909` = 当前处于第 1909 个周期
 - `sample=977408` = 返回的 sampleTime（应该是 cycle * 512）
 - `host=261074594005` = 返回的 HostTime（应该是周期边界对应的时间）
 
 ### 4. 分析逻辑
+
 - 如果 `cycle` 每次调用都在增长 → 说明周期计算正确
 - 如果 `sample` 不是 512 的倍数 → 需要对齐到周期边界
 - 如果 `host` 和 `now` 差值很大 → outHostTime 返回的不是周期起始时间

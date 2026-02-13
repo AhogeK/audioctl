@@ -2,6 +2,16 @@
 
 ## 当前会话概览 (2026-02-14)
 
+### 🛡️ 协议更新 (Protocol Update)
+
+* **Git 操作红线**: 依据 `AGENTS.md` 和 `.opencode/agents/audio_architect.md` 的最新修订，**严禁** AI 自主执行
+  `git commit`。
+* **AI 交付边界**: AI 的职责止步于 "清理与暂存 (Cleanup & Staging)"。
+    1. 清理调试代码。
+    2. 执行 `git add`。
+    3. 生成 Commit Message 建议供用户参考。
+    4. 由**用户**执行最终的 `git commit`。
+
 ### 🎯 核心目标
 解决虚拟音频驱动的 "无声 (No Sound)" 和 "爆音 (Glitching)" 两个致命问题，使驱动达到可用状态。
 
@@ -32,5 +42,7 @@
   - `coreaudiod` 日志无报错。
 
 ### 🔜 下一步
+
+- **路线图**: 详细规划已移至 [Future Roadmap](future_roadmap.md)。
 - 清理代码中的调试日志。
 - 实现音量调节功能 (目前音量调节无效)。

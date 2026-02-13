@@ -52,7 +52,7 @@ source ~/.zshrc
 # 1. 检查虚拟设备状态
 audioctl virtual-status
 
-# 2. 切换到虚拟设备（自动创建 Aggregate Device 并路由音频）
+# 2. 切换到虚拟设备（启动后台路由服务转发音频）
 # 首次运行会自动启动后台路由进程
 audioctl use-virtual
 
@@ -109,10 +109,10 @@ audioctl app-unmute Safari
 ## 开发状态
 
 - ✅ 基础设备控制
-- ✅ 虚拟音频驱动
-- 🚧 应用音量控制
-- 🚧 Aggregate Device 音频路由
-- 🚧 自动绑定物理设备
+- ✅ 虚拟音频驱动 (Freewheel Clock, Zero-Jitter)
+- ✅ 高性能音频路由服务 (Ring Buffer)
+- ✅ 自动绑定物理设备
+- 🚧 应用音量控制 (IPC 管道已通，需完善应用识别逻辑)
 - 🚧 图形界面 (计划中)
 
 ## 许可证
