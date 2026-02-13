@@ -30,9 +30,6 @@ description: "结束当前会话：执行休眠存档，同步进度与架构决
         - `git push`
         - 创建/更新 PR（如需要）
 
-- **专家池挂起 (Ask Expert)**：
-    - 如果有尚未解决且需要主理人去求助其他 AI 模型的底层疑难杂症，请确保已写入 `devlog/ask_expert.txt`。
-
 - **统一推送 (Git Push)**：
     - 执行 `git status` 检查是否有未提交的变更。
     - 执行 `git pull --rebase` 拉取远程变更。

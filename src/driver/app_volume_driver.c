@@ -319,7 +319,7 @@ app_volume_driver_apply_volume (UInt32 clientID, void *buffer,
   if (volume >= 0.999f)
     return;
 
-  // 应用音量
+  // 应用音量 (Interleaved: L R L R ...)
   Float32 *samples = (Float32 *) buffer;
   UInt32 totalSamples = frameCount * channels;
 

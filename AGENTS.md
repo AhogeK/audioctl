@@ -90,9 +90,54 @@ AI 的职责是：
 ## 🛡️ 通用开发红线
 
 * **格式化约束**: 提交任何代码前必须符合 LLVM 风格（强制依赖 `clang-format` 自动化对齐）。
-* **实时性约束**: 在 `AudioDeviceIOProc` 回调中**绝对禁止**内存分配（`malloc`/`new`）与阻塞性锁操作（应使用无锁数据结构或
-  Atomics）。
+* **实时性约束**: 在 `AudioDeviceIOProc` 回调中**绝对禁止**内存分配（`malloc`/`new`）与阻塞性锁操作（应使用无锁数据结构或 Atomics）。
 * **生态纯洁性**: 严禁引入 Web 技术栈（如 Electron、Tauri 等），坚持 macOS 极致原生性能与体验。
+
+---
+
+## 🎯 AI 与人类职责分工
+
+### AI 职责（我）
+1. **编译检查**: 确保代码能编译通过
+2. **单测运行**: 确保单元测试通过
+3. **日志分析**: 当用户测试出现问题时，负责查看日志分析原因
+
+### 人类职责（你）
+1. **实际安装**: 运行 `./scripts/install.sh install`（注意：必须重启 coreaudiod）
+2. **实际测试**: 切换设备、播放音频等实际操作
+3. **问题反馈**: 告诉 AI 出现了什么问题（如"没声音"）
+
+### 关键提醒
+- **安装必须重启 coreaudiod**: 不能使用 `--no-coreaudio-restart`，否则新代码不会生效
+- 安装后需要手动重启 coreaudiod 或等待系统加载新驱动
+
+---
+
+## 🔍 调试日志查看流程
+
+当用户测试出现问题时，AI 需要按以下步骤查看日志：
+
+### 1. 查看 coreaudiod 中的错误
+```bash
+/usr/bin/log show --predicate 'process == "coreaudiod"' --last 30s 2>&1 | grep -iE "timestamp|VADriver|anchor|sample" | tail -20
+```
+
+### 2. 查看驱动调试日志（需要 sudo）
+```bash
+sudo log show --predicate 'message contains "GetZTS"' --last 30s 2>&1 | head -10
+```
+（"GetZTS" 是自定义的日志关键词，可在代码中修改）
+
+### 3. 关键指标解读
+- `sample diff: 1024` = 时间戳跳跃了 2 个周期（应该 512）
+- `cycle=1909` = 当前处于第 1909 个周期
+- `sample=977408` = 返回的 sampleTime（应该是 cycle * 512）
+- `host=261074594005` = 返回的 HostTime（应该是周期边界对应的时间）
+
+### 4. 分析逻辑
+- 如果 `cycle` 每次调用都在增长 → 说明周期计算正确
+- 如果 `sample` 不是 512 的倍数 → 需要对齐到周期边界
+- 如果 `host` 和 `now` 差值很大 → outHostTime 返回的不是周期起始时间
 
 ---
 

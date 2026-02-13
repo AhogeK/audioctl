@@ -19,27 +19,20 @@ static pthread_mutex_t gPlugIn_StateMutex = PTHREAD_MUTEX_INITIALIZER;
 static UInt32 gPlugIn_RefCount = 0;
 static AudioServerPlugInHostRef gPlugIn_Host = NULL;
 static Float64 gDevice_SampleRate = 48000.0;
-
-// 核心状态变量
+// 【关键修复】使用原子变量避免实时线程中的互斥锁
 static _Atomic UInt64 gDevice_IOIsRunning = 0;
 static Float64 gDevice_HostTicksPerFrame = 0.0;
 static _Atomic UInt64 gDevice_NumberTimeStamps = 0;
 static _Atomic UInt64 gDevice_AnchorHostTime = 0;
-// [Freewheel] 维护一个全局的采样计数器，作为所有时间的基准
-static _Atomic UInt64 gDevice_CurrentFrameCount = 0;
 
 // 重构新增：Zero TimeStamp 周期和 Seed
-// 尝试增大周期到 4096 以容忍调度抖动
-static const UInt32 kZeroTimeStampPeriod = 4096;
+static const UInt32 kZeroTimeStampPeriod = 512; // 512 帧短周期
 static atomic_uint_fast64_t gZTS_Seed = 1; // 原子 Seed，用于强制 Host 重收敛
 
 // [修复] Loopback 缓冲区 - 用于输入操作读取输出数据
 static Float32 gLoopbackBuffer[16384];
 static volatile atomic_uint gLoopbackWritePos = 0;
 static volatile atomic_uint gLoopbackReadPos = 0;
-
-// 定义 Log Subsystem
-static os_log_t gLog = NULL;
 
 // Forward Declarations
 
@@ -229,14 +222,6 @@ VirtualAudioDriver_Initialize (AudioServerPlugInDriverRef __unused inDriver,
   mach_timebase_info (&tb);
   Float64 freq = (Float64) tb.denom / (Float64) tb.numer * 1000000000.0;
   gDevice_HostTicksPerFrame = freq / gDevice_SampleRate;
-  
-  // 初始化日志系统
-  if (gLog == NULL) {
-      gLog = os_log_create("com.ahogek.audioctl", "Driver");
-  }
-  os_log_info(gLog, "VirtualAudioDriver init: Rate=%.1f, Numer=%u, Denom=%u, TicksPerFrame=%.4f", 
-              gDevice_SampleRate, tb.numer, tb.denom, gDevice_HostTicksPerFrame);
-  
   app_volume_driver_init ();
 
   return 0;
@@ -252,7 +237,7 @@ VirtualAudioDriver_StartIO (AudioServerPlugInDriverRef __unused inDriver,
   // 验证设备 ID 是否正确
   if (inDeviceObjectID != kObjectID_Device)
     {
-      return kAudioHardwareBadObjectError;
+      return -1; // 通用错误码
     }
 
   // 【修复】使用原子操作替代互斥锁
@@ -260,24 +245,15 @@ VirtualAudioDriver_StartIO (AudioServerPlugInDriverRef __unused inDriver,
   UInt64 prevCount
     = atomic_fetch_add_explicit (&gDevice_IOIsRunning, 1, memory_order_acq_rel);
 
-  if (gLog) os_log_info(gLog, "StartIO: ClientID=%u, PrevCount=%llu", inClientID, prevCount);
-
   if (prevCount == 0)
     {
-      // 第一个客户端启动
-      atomic_store_explicit (&gDevice_NumberTimeStamps, 0, memory_order_release);
-      
-      // [Freewheel] 重置采样计数器
-      atomic_store_explicit(&gDevice_CurrentFrameCount, 0, memory_order_release);
-
-      // 设定 Anchor 为当前时间
-      UInt64 now = mach_absolute_time();
-      atomic_store_explicit (&gDevice_AnchorHostTime, now, memory_order_release);
-      
+      // 第一个客户端启动，重置时间戳计数并设置新的 Anchor 时间
+      atomic_store_explicit (&gDevice_NumberTimeStamps, 0,
+			     memory_order_release);
+      atomic_store_explicit (&gDevice_AnchorHostTime, mach_absolute_time (),
+			     memory_order_release);
       // 自增 Seed 强制 Host 重新收敛时钟
       atomic_fetch_add_explicit (&gZTS_Seed, 1, memory_order_release);
-      
-      if (gLog) os_log_info(gLog, "StartIO: Freewheel Clock Started, Anchor=%llu", now);
     }
 
   return 0;
@@ -295,8 +271,6 @@ VirtualAudioDriver_StopIO (AudioServerPlugInDriverRef __unused inDriver,
   UInt64 prevCount
     = atomic_fetch_sub_explicit (&gDevice_IOIsRunning, 1, memory_order_acq_rel);
 
-  if (gLog) os_log_info(gLog, "StopIO: ClientID=%u, PrevCount=%llu", inClientID, prevCount);
-
   if (prevCount == 1)
     {
       // 最后一个客户端停止，重置 ring buffer
@@ -307,48 +281,117 @@ VirtualAudioDriver_StopIO (AudioServerPlugInDriverRef __unused inDriver,
       memset (gLoopbackBuffer, 0, sizeof (gLoopbackBuffer));
       // 自增 Seed 强制 Host 重新收敛
       atomic_fetch_add_explicit (&gZTS_Seed, 1, memory_order_release);
-      
-      if (gLog) os_log_info(gLog, "StopIO: Last client, reset buffers");
     }
 
   return 0;
 }
 
-// 【关键修复】GetZeroTimeStamp - Freewheel 模式
-// 完全基于驱动内部的 SampleCounter 推算 HostTime，忽略系统时钟的微小抖动
+// [重构时钟策略 - Refactored Clock Strategy]
+//
+// 周期从 16384 帧改为 512 帧，消除"慢放感"
+// 基于 mach_absolute_time() 的单调推导，不再依赖缓冲区计数
+// gZTS_Seed 在 Start/Stop/Underrun/Overrun 时自增，强制 Host 重新收敛
+//
+// 技术规格：
+//   - 周期: 512 帧 (约 10.67ms @ 48kHz)
+//   - 格式: Non-Interleaved Float32, 2ch
+//   - 时钟源: mach_absolute_time() 转换为音频采样时间
+
+// 【关键修复】安全的 GetZeroTimeStamp 实现，防止 CPU 卡死
+// 修复内容：
+// 1. 防止除零：检查 gDevice_HostTicksPerFrame 是否为 0
+// 2. 防止时间回绕：检查 AnchorTime 是否已初始化
+// 3. 防止 Inf/NaN：验证计算结果有效性
 static OSStatus
 VirtualAudioDriver_GetZeroTimeStamp (
   AudioServerPlugInDriverRef __unused inDriver,
   AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID,
   Float64 *outSampleTime, UInt64 *outHostTime, UInt64 *outSeed)
 {
+  // 【修复】检查输出指针
   if (outSampleTime == NULL || outHostTime == NULL || outSeed == NULL)
     {
-      return kAudioHardwareIllegalOperationError;
+      return -1; // 通用错误
     }
 
+  // 【修复】防止除零：如果 HostTicksPerFrame 未初始化，使用默认值
+  // 默认值基于 48kHz 和纳秒时钟
   Float64 hostTicksPerFrame = gDevice_HostTicksPerFrame;
   if (hostTicksPerFrame <= 0.0)
     {
+      // 安全默认值：假设 1 tick = 1 ns @ 48kHz
       hostTicksPerFrame = 1000000000.0 / 48000.0;
     }
 
-  // 1. 获取基准 Anchor
-  UInt64 anchorTime = atomic_load_explicit(&gDevice_AnchorHostTime, memory_order_acquire);
-  
-  // 2. 获取当前驱动已经推进到的帧数
-  UInt64 currentFrames = atomic_load_explicit(&gDevice_CurrentFrameCount, memory_order_acquire);
+  // 【修复】防止时间回绕：检查 AnchorTime 是否已初始化
+  UInt64 anchorTime = gDevice_AnchorHostTime;
+  if (anchorTime == 0)
+    {
+      // 未初始化，使用当前时间作为锚点
+      anchorTime = mach_absolute_time ();
+      gDevice_AnchorHostTime = anchorTime;
+    }
 
-  // 3. 计算对应的逻辑 HostTime
-  // HostTime = Anchor + Frames * TicksPerFrame
-  UInt64 offsetTicks = (UInt64)((Float64)currentFrames * hostTicksPerFrame);
-  UInt64 logicHostTime = anchorTime + offsetTicks;
+  // 获取当前 mach 时间
+  UInt64 now = mach_absolute_time ();
 
-  // 4. 返回结果
-  // 这样 HAL 会看到 SampleTime 和 HostTime 永远完美匹配 48kHz 的定义
-  *outSampleTime = (Float64)currentFrames;
-  *outHostTime = logicHostTime;
-  *outSeed = atomic_load_explicit(&gZTS_Seed, memory_order_acquire);
+  // 【修复】防止时间回绕：如果 now < anchor，说明时钟异常
+  UInt64 elapsedTicks;
+  if (now >= anchorTime)
+    {
+      elapsedTicks = now - anchorTime;
+    }
+  else
+    {
+      // 时钟回绕或异常，重置锚点
+      anchorTime = now;
+      gDevice_AnchorHostTime = anchorTime;
+      elapsedTicks = 0;
+    }
+
+  // 计算经过的帧数
+  Float64 elapsedFrames = (Float64) elapsedTicks / hostTicksPerFrame;
+
+  // 【修复】防止 Inf/NaN：检查结果有效性
+  if (!isfinite (elapsedFrames) || elapsedFrames < 0.0)
+    {
+      elapsedFrames = 0.0;
+    }
+
+  // 计算周期数 (每 512 帧一个周期)
+  UInt64 periodCount
+    = (UInt64) (elapsedFrames / (Float64) kZeroTimeStampPeriod);
+
+  // 计算采样时间：周期数 * 周期大小
+  Float64 sampleTime = (Float64) periodCount * (Float64) kZeroTimeStampPeriod;
+
+  // 【修复】防止 Inf/NaN
+  if (!isfinite (sampleTime) || sampleTime < 0.0)
+    {
+      sampleTime = 0.0;
+      periodCount = 0;
+    }
+
+  *outSampleTime = sampleTime;
+
+  // 计算对应的主机时间
+  Float64 hostTimeFloat
+    = (Float64) anchorTime
+      + (Float64) (periodCount * kZeroTimeStampPeriod) * hostTicksPerFrame;
+
+  // 【修复】防止 Inf/NaN 和溢出
+  if (!isfinite (hostTimeFloat) || hostTimeFloat < 0.0
+      || hostTimeFloat > (Float64) UINT64_MAX)
+    {
+      *outHostTime = anchorTime;
+    }
+  else
+    {
+      *outHostTime = (UInt64) hostTimeFloat;
+    }
+
+  // 返回原子 Seed
+  *outSeed = atomic_load (&gZTS_Seed);
 
   return 0;
 }
@@ -359,32 +402,67 @@ VirtualAudioDriver_WillDoIOOperation (
   AudioObjectID __unused inDeviceObjectID, UInt32 __unused inClientID,
   UInt32 inOperationID, Boolean *outWillDo, Boolean *outWillDoInPlace)
 {
-  // 【修复】更精细的控制
-  // ProcessOutput: 音量控制，必须支持，InPlace=true
-  // WriteMix: 写入 RingBuffer，InPlace=true (虽然我们不修改数据，但这样效率高)
-  // ReadInput: 从 RingBuffer 读取，InPlace=true (直接写到目标 buffer)
-  
-  bool willDo = false;
-  bool willDoInPlace = true;
-
+  // 【修复】只启用必要的操作，避免 MixOutput 短路 WriteMix
+  // ProcessOutput: per-client gain (per-app volume)
+  // WriteMix: write to loopback ring (once per cycle)
+  // ReadInput: read from loopback ring
+  // ⚠️ 不要启用 ProcessMix/MixOutput，否则 WriteMix 不会被调用，导致无声
+  bool ok = false;
   switch (inOperationID)
     {
     case kAudioServerPlugInIOOperationProcessOutput:
     case kAudioServerPlugInIOOperationWriteMix:
     case kAudioServerPlugInIOOperationReadInput:
-      willDo = true;
+      ok = true;
       break;
     default:
-      willDo = false;
+      ok = false;
       break;
     }
-
   if (outWillDo)
-    *outWillDo = willDo;
+    *outWillDo = ok;
   if (outWillDoInPlace)
-    *outWillDoInPlace = willDoInPlace;
-    
+    *outWillDoInPlace = true;
   return 0;
+}
+
+// 【修复】ABL 稳健校验：返回实际可安全读写的帧数，0 表示布局错误
+static inline UInt32
+abl_ni_clamp_frames (const AudioBufferList *abl, UInt32 ch, UInt32 frames)
+{
+  if (abl->mNumberBuffers != ch)
+    return 0;
+
+  UInt32 minFrames = frames;
+  for (UInt32 b = 0; b < ch; b++)
+    {
+      const AudioBuffer *buffer
+	= (const AudioBuffer *) ((const uint8_t *) &abl->mBuffers[0]
+				 + (b * sizeof (AudioBuffer)));
+      if (buffer->mNumberChannels != 1 || !buffer->mData)
+	return 0;
+
+      UInt32 maxFrames = (UInt32) (buffer->mDataByteSize / sizeof (Float32));
+      if (maxFrames < minFrames)
+	minFrames = maxFrames;
+    }
+  return minFrames;
+}
+
+// 【修复】ABL 清零：将缓冲区置零（用于布局错误时输出静音）
+static inline void
+abl_ni_zero (AudioBufferList *abl, UInt32 ch, UInt32 frames)
+{
+  UInt32 useCh = (abl->mNumberBuffers < ch) ? abl->mNumberBuffers : ch;
+  for (UInt32 b = 0; b < useCh; b++)
+    {
+      AudioBuffer *buffer = (AudioBuffer *) ((uint8_t *) &abl->mBuffers[0]
+					     + (b * sizeof (AudioBuffer)));
+      if (buffer->mData && buffer->mDataByteSize >= frames * sizeof (Float32))
+	{
+	  memset (buffer->mData, 0, frames * sizeof (Float32));
+	}
+    }
 }
 
 // 错误布局计数器（原子，用于调试）
@@ -395,9 +473,6 @@ note_bad_abl (void)
 {
   atomic_fetch_add (&gABLBadLayoutCount, 1);
 }
-
-
-static atomic_uint_fast64_t gIOCycleCount = 0;
 
 static OSStatus
 VirtualAudioDriver_DoIOOperation (
@@ -411,60 +486,59 @@ VirtualAudioDriver_DoIOOperation (
   if (!ioMainBuffer || inIOBufferFrameSize == 0)
     return 0;
 
-  // 调试日志：每 100 个周期打印一次 WriteMix，确认有数据
-  // 注意：不要在实时线程频繁打印
-  if (inOperationID == kAudioServerPlugInIOOperationWriteMix) {
-      atomic_fetch_add_explicit(&gIOCycleCount, 1, memory_order_relaxed);
-  }
-
   // 【修复】验证 ABL 布局并获取安全帧数
   AudioBufferList *abl = (AudioBufferList *) ioMainBuffer;
-  // 对于 Interleaved 格式，我们期望 mNumberBuffers=1, mNumberChannels=2
-  if (abl->mNumberBuffers != 1) {
-      note_bad_abl();
+  UInt32 frames = abl_ni_clamp_frames (abl, 2, inIOBufferFrameSize);
+  if (frames == 0)
+    {
+      // 布局错误或缓冲区太小，输出静音
+      note_bad_abl ();
+      abl_ni_zero (abl, 2, inIOBufferFrameSize);
       return 0;
-  }
-  
-  AudioBuffer *buffer = &abl->mBuffers[0];
-  if (!buffer->mData || buffer->mNumberChannels != 2) {
-      note_bad_abl();
+    }
+
+  // 【关键修复】使用更安全的数组索引访问，避免指针算术
+  // 验证 mNumberBuffers 至少有2个缓冲区（由 abl_ni_clamp_frames 检查）
+  AudioBuffer *leftBuffer = &abl->mBuffers[0];
+  AudioBuffer *rightBuffer = &abl->mBuffers[1];
+
+  // 【关键修复】验证缓冲区数据指针非空
+  if (leftBuffer->mData == NULL || rightBuffer->mData == NULL)
+    {
+      // 数据指针为空，输出静音
+      note_bad_abl ();
+      abl_ni_zero (abl, 2, inIOBufferFrameSize);
       return 0;
-  }
+    }
 
-  // 帧数 = 字节数 / 每帧字节数 (8)
-  UInt32 frames = buffer->mDataByteSize / 8;
-  // 限制为请求的帧数
-  if (frames > inIOBufferFrameSize) {
-      frames = inIOBufferFrameSize;
-  }
-
-  Float32 *samples = (Float32 *) buffer->mData;
+  Float32 *leftChannel = (Float32 *) leftBuffer->mData;
+  Float32 *rightChannel = (Float32 *) rightBuffer->mData;
 
   // 处理输出操作：应用音量控制并存储到 loopback 缓冲区
   if (inOperationID == kAudioServerPlugInIOOperationProcessOutput)
     {
       // [实时音频路径 - 热路径 Hot Path]
-      // 恢复音量控制
-      app_volume_driver_apply_volume(inClientID, samples, frames, 2);
+      // 对每个声道分别应用音量（in-place 处理）
+      app_volume_driver_apply_volume_ni (inClientID, leftChannel, rightChannel,
+					 frames);
     }
   else if (inOperationID == kAudioServerPlugInIOOperationWriteMix)
     {
-      // 将处理后的音频数据写入 loopback 缓冲区
-      // 已经是 Interleaved 格式 (LRLRLR...)，直接拷贝即可
+      // 将处理后的音频数据写入 loopback 缓冲区（平面存储）
+      // 交错格式写入：LRLRLR...
       UInt32 writePos = atomic_load (&gLoopbackWritePos);
-      UInt32 totalSamples = frames * 2;
-      
-      for (UInt32 i = 0; i < totalSamples; i++)
+      for (UInt32 i = 0; i < frames; i++)
 	{
-	  gLoopbackBuffer[writePos] = samples[i];
+	  // 左声道
+	  gLoopbackBuffer[writePos] = leftChannel[i];
+	  writePos = (writePos + 1)
+		     % (sizeof (gLoopbackBuffer) / sizeof (gLoopbackBuffer[0]));
+	  // 右声道
+	  gLoopbackBuffer[writePos] = rightChannel[i];
 	  writePos = (writePos + 1)
 		     % (sizeof (gLoopbackBuffer) / sizeof (gLoopbackBuffer[0]));
 	}
       atomic_store (&gLoopbackWritePos, writePos);
-      
-      // [Freewheel] 推进时间轴
-      // 这是最关键的一步：只有在这里，我们才认为时间真正前进了
-      atomic_fetch_add_explicit(&gDevice_CurrentFrameCount, frames, memory_order_release);
     }
   // 处理输入操作：从 loopback 缓冲区读取数据
   else if (inOperationID == kAudioServerPlugInIOOperationReadInput)
@@ -474,20 +548,24 @@ VirtualAudioDriver_DoIOOperation (
       UInt32 bufferSize
 	= sizeof (gLoopbackBuffer) / sizeof (gLoopbackBuffer[0]);
 
-      // 计算可用数据量（采样点数）
+      // 计算可用数据量（以采样点计，每个采样点是一个声道）
       UInt32 available;
       if (writePos >= readPos)
 	available = writePos - readPos;
       else
 	available = bufferSize - readPos + writePos;
 
-      UInt32 sampleCount = frames * 2;
+      UInt32 sampleCount = frames * 2; // 总采样点数（左右声道）
 
       if (available >= sampleCount)
 	{
-	  for (UInt32 i = 0; i < sampleCount; i++)
+	  for (UInt32 i = 0; i < frames; i++)
 	    {
-	      samples[i] = gLoopbackBuffer[readPos];
+	      // 左声道
+	      leftChannel[i] = gLoopbackBuffer[readPos];
+	      readPos = (readPos + 1) % bufferSize;
+	      // 右声道
+	      rightChannel[i] = gLoopbackBuffer[readPos];
 	      readPos = (readPos + 1) % bufferSize;
 	    }
 	  atomic_store (&gLoopbackReadPos, readPos);
@@ -495,7 +573,8 @@ VirtualAudioDriver_DoIOOperation (
       else
 	{
 	  // 数据不足，输出静音
-	  memset (samples, 0, sampleCount * sizeof (Float32));
+	  memset (leftChannel, 0, frames * sizeof (Float32));
+	  memset (rightChannel, 0, frames * sizeof (Float32));
 	}
     }
 
@@ -599,10 +678,7 @@ VirtualAudioDriver_GetPropertyDataSize (
   if (inObjectID == kObjectID_Device
       && inAddress->mSelector == kAudioDevicePropertyStreams)
     {
-      if (inAddress->mScope == kAudioObjectPropertyScopeGlobal)
-        *outDataSize = sizeof (AudioObjectID) * 2;
-      else
-        *outDataSize = sizeof (AudioObjectID);
+      *outDataSize = sizeof (AudioObjectID) * 2; // 输出流和输入流
     }
   else if (inObjectID == kObjectID_Device
 	   && inAddress->mSelector == kAudioDevicePropertyStreamConfiguration)
@@ -708,47 +784,25 @@ VirtualAudioDriver_GetPropertyData (
 	  *outDataSize = sizeof (CFStringRef);
 	  break;
 	case kAudioDevicePropertyStreams:
-	  // [修复] 根据 Scope 返回正确的流
-	  if (inAddress->mScope == kAudioObjectPropertyScopeOutput)
-	    {
-	      ((AudioObjectID *) outData)[0] = kObjectID_Stream_Output;
-	      *outDataSize = sizeof (AudioObjectID);
-	    }
-	  else if (inAddress->mScope == kAudioObjectPropertyScopeInput)
-	    {
-	      ((AudioObjectID *) outData)[0] = kObjectID_Stream_Input;
-	      *outDataSize = sizeof (AudioObjectID);
-	    }
-	  else
-	    {
-	      // Global scope: return both? CoreAudio usually asks for specific scope.
-	      // If asked globally, return both.
-	      ((AudioObjectID *) outData)[0] = kObjectID_Stream_Output;
-	      ((AudioObjectID *) outData)[1] = kObjectID_Stream_Input;
-	      *outDataSize = sizeof (AudioObjectID) * 2;
-	    }
+	  // 返回输出流和输入流（支持双工操作）
+	  ((AudioObjectID *) outData)[0] = kObjectID_Stream_Output;
+	  ((AudioObjectID *) outData)[1] = kObjectID_Stream_Input;
+	  *outDataSize = sizeof (AudioObjectID) * 2;
 	  break;
 	  case kAudioDevicePropertyStreamConfiguration: {
-	    // [修复] 根据 Scope 返回正确的缓冲区配置
-	    // Output Scope -> Output Buffer (2ch)
-	    // Input Scope -> Input Buffer (2ch)
-	    
+	    // 修改：Non-Interleaved 格式下，每个声道一个独立的缓冲区
 	    AudioBufferList *list = (AudioBufferList *) outData;
-	    list->mNumberBuffers = 1; 
-	    AudioBuffer *buffer = &list->mBuffers[0];
-	    buffer->mNumberChannels = 2; // 立体声
-	    buffer->mDataByteSize = 1024 * 8; 
-	    buffer->mData = NULL;
-	    
-	    // 注意：如果我们在这里不区分 Scope，Input 和 Output 都会得到一个 Buffer
-	    // 这对于 Device 来说通常是可以的，因为 CoreAudio 会根据 Scope 来拿
-	    // 但是如果 CoreAudio 用 Global Scope 问“总共有多少 Buffer”，那我们应该返回 2 个？
-	    // 对于 kAudioDevicePropertyStreamConfiguration，通常是 per-scope 的。
-	    
-	    // 如果是 Input 或 Output Scope，我们只返回 1 个 buffer。
-	    // 如果是 Global Scope，这可能意味着总配置？
-	    // HAL 通常只在特定 Scope 下调用此属性。
-	    
+	    list->mNumberBuffers = 2; // 2个声道，每个声道一个缓冲区
+	    for (UInt32 i = 0; i < 2; i++)
+	      {
+		// 使用指针访问以避免固定大小数组越界警告
+		AudioBuffer *buffer
+		  = (AudioBuffer *) ((uint8_t *) &list->mBuffers[0]
+				     + (i * sizeof (AudioBuffer)));
+		buffer->mNumberChannels = 1; // 每个缓冲区只有一个声道
+		buffer->mDataByteSize = 512 * sizeof (Float32); // 每帧4字节
+		buffer->mData = NULL;
+	      }
 	    *outDataSize = sizeof (AudioBufferList) + sizeof (AudioBuffer);
 	  }
 	  break;
@@ -766,13 +820,9 @@ VirtualAudioDriver_GetPropertyData (
 	  break;
 	// [修复] 关键属性：设备延迟和同步
 	case kAudioDevicePropertyLatency:
+	case kAudioDevicePropertySafetyOffset:
 	  // 虚拟设备通常为 0 延迟
 	  *((UInt32 *) outData) = 0;
-	  *outDataSize = sizeof (UInt32);
-	  break;
-	case kAudioDevicePropertySafetyOffset:
-	  // [修复] 增加安全偏移，容忍调度抖动
-	  *((UInt32 *) outData) = 4096;
 	  *outDataSize = sizeof (UInt32);
 	  break;
 	case kAudioDevicePropertyZeroTimeStampPeriod:
@@ -866,19 +916,21 @@ VirtualAudioDriver_GetPropertyData (
 	  *((UInt32 *) outData) = 1;
 	  *outDataSize = sizeof (UInt32);
 	  break;
-	// [修复] 强制使用 Interleaved 格式，消除 AudioConverter 错误
 	case kAudioStreamPropertyVirtualFormat:
 	case kAudioStreamPropertyPhysicalFormat:
+	  // 设置音频格式：48kHz, 32-bit Float, 2 channels, Non-Interleaved
+	  // 修改：从 Interleaved 改为 Non-Interleaved (Planar)，消除"慢放感"
 	  {
 	    AudioStreamBasicDescription *format
 	      = (AudioStreamBasicDescription *) outData;
 	    format->mSampleRate = 48000.0;
 	    format->mFormatID = kAudioFormatLinearPCM;
-	    // [修复] 移除 NonInterleaved 标志，改为标准的交错浮点
-	    format->mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked; 
-	    format->mBytesPerPacket = 8; // 2ch * 4bytes
+	    format->mFormatFlags = kAudioFormatFlagIsFloat
+				   | kAudioFormatFlagIsPacked
+				   | kAudioFormatFlagIsNonInterleaved;
+	    format->mBytesPerPacket = 4;
 	    format->mFramesPerPacket = 1;
-	    format->mBytesPerFrame = 8; // 2ch * 4bytes
+	    format->mBytesPerFrame = 4;
 	    format->mChannelsPerFrame = 2;
 	    format->mBitsPerChannel = 32;
 	    format->mReserved = 0;
@@ -891,11 +943,12 @@ VirtualAudioDriver_GetPropertyData (
 	      = (AudioStreamRangedDescription *) outData;
 	    format->mFormat.mSampleRate = 48000.0;
 	    format->mFormat.mFormatID = kAudioFormatLinearPCM;
-	    // [修复] 移除 NonInterleaved 标志
-	    format->mFormat.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-	    format->mFormat.mBytesPerPacket = 8;
+	    format->mFormat.mFormatFlags = kAudioFormatFlagIsFloat
+					   | kAudioFormatFlagIsPacked
+					   | kAudioFormatFlagIsNonInterleaved;
+	    format->mFormat.mBytesPerPacket = 4;
 	    format->mFormat.mFramesPerPacket = 1;
-	    format->mFormat.mBytesPerFrame = 8;
+	    format->mFormat.mBytesPerFrame = 4;
 	    format->mFormat.mChannelsPerFrame = 2;
 	    format->mFormat.mBitsPerChannel = 32;
 	    format->mFormat.mReserved = 0;

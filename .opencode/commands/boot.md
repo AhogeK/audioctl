@@ -18,16 +18,23 @@ description: "智能唤醒工作流：环境嗅探、记忆挂载与按需时效
     - **自主判断**：基于步骤 1 识别出的技术栈，判断是否涉及近期有重大更迭的领域。
     - **主动对齐**：若有必要，主动获取当前时间或通过 `web_search` 确认相关技术的最新 SOTA（业界领先）标准。
 
-4. **远端同步前置检查（Human-only）**：
-    - 提醒人类在终端检查是否存在需要拉取的远端更新，并完成同步后再继续。
-    - 人类执行并确认以下命令输出无异常：
+4. **远端同步前置检查**：
+    - AI 执行以下命令确保本地代码库是最新状态：
 
-      git status
-      git fetch
-      git pull --rebase
-      git status
+          git fetch
+          git status
 
-    - 若同步带来冲突或变更，先处理冲突并重新运行质量门控（如 build/test/fmt），再进入后续步骤。
+    - 若发现远端有更新（`git status` 显示 "behind"），执行拉取并处理可能的冲突：
+
+          git pull --rebase
+
+    - 若拉取过程产生冲突或代码变更，必须先重新运行质量门控后再继续开发：
+
+          find src include tests -name "*.[chm]" | xargs clang-format -i
+          ./scripts/install.sh install --no-coreaudio-restart
+          cd cmake-build-debug && ctest --output-on-failure
+
+    - 确认 `git status` 显示 "working tree clean" 且无冲突后，进入下一步。
 
 5. **任务状态同步**：
     - 执行 `bd ready` 检查无阻塞的可执行任务。
