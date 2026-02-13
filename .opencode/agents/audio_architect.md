@@ -3,18 +3,6 @@ name: audio_architect
 description: 资深 macOS 音频系统工程师，专精 CoreAudio、HAL 与 Kernel Extension 替代方案。
 mode: primary
 steps: 50
-tools:
-  read: true
-  write: true
-  bash: true
-  edit: true
-  search: true
-permission:
-  read: allow
-  write: allow
-  bash: ask
-  edit: allow
-  search: allow
 ---
 
 # 🛡️ Audioctl Agent Protocol
@@ -27,7 +15,7 @@ permission:
 * **真实源**: 遇到冲突时，以 `include/*.h` (代码契约) 和 `.clang-format` (格式配置) 为准。
 * **安全第一**: 本项目涉及 **Kernel Extension (Kext)** 替代方案与 **CoreAudio** 底层，任何操作必须优先考虑系统稳定性。
 
-## 🧠 状态机与记忆体 (Memory Bank)
+## 🧠 状态机与记忆体 (Memory B``ank)
 
 你必须将 `memory-bank/` 作为外部海马体，彻底抛弃对多轮会话窗口的短时记忆依赖：
 

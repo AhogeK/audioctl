@@ -31,6 +31,49 @@
 
 ---
 
+## ☁️ 云端操作权限（Human-only）
+
+本项目中，涉及远端仓库或云平台的操作必须由**人类**执行，AI 不得代为完成或自动化触发，包括但不限于：
+
+- `git commit` / `git push` / `git pull --rebase` / `git merge`
+- 创建或更新 PR（GitHub/GitLab 等）
+- 任何需要上传、发布、同步到远端的动作
+
+AI 的职责是：
+
+- 在每个“可提交的小步骤”完成后，生成清晰的变更说明与测试清单
+- 停下并询问人类是否执行测试、是否提交、提交信息如何写
+- 若需要拉取远端更新，明确提醒人类先完成同步，再继续开发
+
+## ⛳ 小步提交确认（Checkpoint Gate）
+
+任何达到“可以提交”的粒度后，AI 必须进入 Checkpoint：
+
+- 列出本次变更点（面向 code review）
+- 列出建议测试点与命令（面向验证）
+- 等待人类确认后才继续下一步工作
+
+详细协议参见 `.opencode/commands/checkpoint.md`。
+
+## 📋 结构化任务管理 (Beads Integration)
+
+除了 `memory-bank` 的上下文记忆，本项目使用 **bd (beads)** 进行工程任务的结构化跟踪：
+
+* **任务发现**: 通过 `bd ready` 查询无阻塞的可执行任务（具备依赖树意识）。
+* **多会话协作**: bd 数据库（`.beads/issues.jsonl`）存储在 Git 中，支持多 Agent 或多轮会话的状态同步。
+* **优先级驱动**: 任务带有 P0/P1/P2 优先级，AI 应优先处理高优先级的 `ready` 任务。
+
+**关键命令**：
+
+- `bd ready` - 查看可执行任务
+- `bd update <id> --status in_progress` - 认领任务
+- `bd close <id>` - 完成任务
+- `bd sync` - 同步至 Git（必须在 sleep 前执行）
+
+详细协议请参阅 `.opencode/commands/bd.md`。
+
+---
+
 ## 📂 架构战区映射 (Architecture Map)
 
 在特定领域进行开发时，请遵循以下架构规范索引：
