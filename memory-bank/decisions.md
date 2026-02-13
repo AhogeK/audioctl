@@ -44,6 +44,33 @@
 
 ---
 
+## 2026-02-14 - 严格 Scope 校验策略 (Strict Scope Handling)
+
+* **场景上下文**: 驱动在 `audioctl` 测试正常但在系统设置中无声。
+* **根本原因**: CoreAudio 在查询 `kAudioDevicePropertyStreamConfiguration` 时，会传入 `kAudioObjectPropertyScopeGlobal` (
+  wildcard) 或错误的 Scope。旧逻辑直接返回 input+output 的所有流配置，导致 CoreAudio 误认为设备是 4声道 (2 in + 2 out)，而实际
+  buffer 只有 2声道，从而丢弃数据。
+* **最终决定**:
+    - 在 `GetPropertyData` 中严格校验 `inQuery->mScope`。
+    - 只有当请求 Scope 精确匹配 Input 或 Output 时，才返回对应的流配置。
+    - 对于 Global Scope，不返回任何流配置。
+* **结果**: 彻底解决了无声问题。
+
+---
+
+## 2026-02-14 - 自适应飞轮时钟 (Freewheel Clock Strategy)
+
+* **场景上下文**: 即使使用了连续线性时钟，由于系统调度抖动，计算出的 HostTime 仍可能与 HAL 的预期存在微小偏差 (Sample
+  Drift)，导致 `TimeStampOutOfLine`。
+* **最终决定**:
+    - 放弃每次都用 `mach_absolute_time` 计算当前采样点。
+    - 采用 "Freewheel" (飞轮) 模式：仅在 `StartIO` 时记录一次基准时间 (Anchor Time)。
+    - 后续所有时间戳均基于：`BaseTime + (CycleCount * BufferSize)` 推算。
+    - 忽略系统的实时抖动，强行让时钟对齐到理想的 IO 周期。
+* **结果**: 彻底消除了 Glitching 和 Drift，驱动运行极其平稳。
+
+---
+
 ## [日期] - [决策简述，例如：放弃互斥锁改用无锁环形队列]
 
 * **场景上下文**: 在 `AudioDeviceIOProc` 中遇到高频抢占导致的爆音。
