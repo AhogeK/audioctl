@@ -3,9 +3,9 @@
   "instructions": [
     "AGENTS.md"
   ],
-  "agents": {
+  "agent": {
     "audio_architect": {
-      "permissions": {
+      "permission": {
         "run_command": "ask",
         "write_file": "allow"
       }

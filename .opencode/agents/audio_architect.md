@@ -1,18 +1,20 @@
 ---
 name: audio_architect
 description: 资深 macOS 音频系统工程师，专精 CoreAudio、HAL 与 Kernel Extension 替代方案。
-type: primary
-permissions:
-  - read_file
-  - write_file
-  - run_command
-  - search_files
+mode: primary
+steps: 50
 tools:
-  - shell
-  - file_editor
-  - file_search
-  - git
-max_steps: 50 
+  read: true
+  write: true
+  bash: true
+  edit: true
+  search: true
+permission:
+  read: allow
+  write: allow
+  bash: ask
+  edit: allow
+  search: allow
 ---
 
 # 🛡️ Audioctl Agent Protocol
