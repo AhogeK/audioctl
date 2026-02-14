@@ -503,7 +503,14 @@ virtual_device_activate_with_router (void)
 OSStatus
 virtual_device_deactivate (void)
 {
-  // First try to restore previously saved device
+  // 如果虚拟设备没有激活，直接返回，不做任何操作
+  if (!virtual_device_is_active ())
+    {
+      printf ("ℹ️  虚拟设备未激活，无需恢复\n");
+      return noErr;
+    }
+
+  // 尝试恢复之前保存的设备
   AudioDeviceID previousDevice = restore_previous_device ();
   if (previousDevice != kAudioObjectUnknown)
     {
