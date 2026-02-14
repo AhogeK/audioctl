@@ -188,15 +188,15 @@ init_daemon (void)
     close (fd);
 }
 
-// 运行守护进程
+// Run daemon
 _Noreturn void
 run_daemon (void)
 {
-  // 【关键修复】先初始化 daemon（fork 并关闭文件描述符）
+  // Initialize daemon first (fork and close file descriptors)
   init_daemon ();
 
-  // 【关键修复】在 init_daemon() 之后写入 PID
-  // 此时我们已经是最终的守护进程（孙子进程）
+  // Write PID after init_daemon() - now we are the final daemon (grandchild
+  // process)
   write_pid_file (getpid ());
 
   write_log ("守护进程启动");

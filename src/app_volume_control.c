@@ -411,7 +411,7 @@ app_volume_get_active_count (void)
 void
 app_volume_cli_list (void)
 {
-  // 1. 获取虚拟设备 ID
+  // Get virtual device ID
   VirtualDeviceInfo vInfo;
   if (!virtual_device_get_info (&vInfo))
     {
@@ -427,7 +427,7 @@ app_volume_cli_list (void)
       return;
     }
 
-  // 2. 初始化 IPC 客户端
+  // Initialize IPC client
   IPCClientContext ctx;
   if (ipc_client_init (&ctx) != 0)
     {
@@ -442,11 +442,11 @@ app_volume_cli_list (void)
       return;
     }
 
-  // 3. 获取应用列表
+  // Get app list
   IPCAppInfo *apps = NULL;
   uint32_t count = 0;
 
-  // 首先尝试从 IPC 服务获取
+  // First try to get from IPC service
   if (ipc_client_list_apps (&ctx, &apps, &count) != 0 || count == 0)
     {
       AudioAppInfo *fApps = NULL;
@@ -479,7 +479,7 @@ app_volume_cli_list (void)
 	}
     }
 
-  // 4. 显示应用列表
+  // Display app list
   printf ("\n🎵 正在使用虚拟设备的应用 (%d 个):\n", count);
   printf ("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 

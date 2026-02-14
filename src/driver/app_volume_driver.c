@@ -10,10 +10,10 @@
 #include <sys/time.h>
 #include "ipc/ipc_client.h"
 
-// 【修复】定义缓存有效期（ms），与 ipc_client.c 保持一致
+// Cache TTL in milliseconds, must match ipc_client.c
 #define IPC_CACHE_TTL_MS 100
 
-// 客户端条目结构
+// Client entry structure
 typedef struct
 {
   UInt32 clientID;
@@ -29,15 +29,15 @@ static atomic_int g_clientCount = 0;
 
 static bool g_initialized = false;
 
-// IPC 客户端上下文（用于从服务端获取音量）
+// IPC client context (for fetching volume from server)
 static IPCClientContext g_ipcClient = {0};
 static bool g_ipcInitialized = false;
 
-// 本地音量表（作为 IPC 的缓存）
+// Local volume table (IPC cache)
 static AppVolumeTable g_volumeTable = {0};
 static os_unfair_lock g_tableLock = OS_UNFAIR_LOCK_INIT;
 
-// 【关键修复】实时音频路径使用的时间戳函数
+// Timestamp function for real-time audio path
 static uint64_t
 get_timestamp_ms (void)
 {
@@ -264,24 +264,25 @@ app_volume_driver_get_client_pids (pid_t *outPids, UInt32 maxCount,
   return noErr;
 }
 
-#pragma mark - 音量应用
+#pragma mark - Volume Application
 
-// 【关键修复】实时音频路径专用：永不阻塞，只使用缓存
-// 注意：此函数在实时音频线程（IOProc）中被调用，严禁任何阻塞操作
+// Real-time audio path: never blocks, only uses cache
+// Note: this function is called from real-time audio thread (IOProc), must not
+// block
 Float32
 app_volume_driver_get_volume (UInt32 clientID, bool *outIsMuted)
 {
-  Float32 volume = 1.0f; // 默认音量
+  Float32 volume = 1.0f; // Default volume
   bool isMuted = false;
 
-  // 1. 获取 PID (TryLock)
+  // Get PID using TryLock
   pid_t pid = app_volume_driver_get_pid (clientID);
 
-  // 2. 【关键修复】实时路径只读取缓存，永不触发同步IPC
-  // 缓存过期时直接使用默认值，避免阻塞音频线程
+  // Real-time path only reads cache, never triggers synchronous IPC
+  // When cache expires, use default value to avoid blocking audio thread
   if (pid > 0 && g_ipcInitialized)
     {
-      // 只检查缓存，不触发更新
+      // Only check cache, don't trigger update
       uint64_t now = get_timestamp_ms ();
       if (g_ipcClient.cache_valid && g_ipcClient.cached_pid == pid
 	  && (now - g_ipcClient.cache_timestamp) < IPC_CACHE_TTL_MS)
@@ -289,8 +290,8 @@ app_volume_driver_get_volume (UInt32 clientID, bool *outIsMuted)
 	  volume = g_ipcClient.cached_volume;
 	  isMuted = g_ipcClient.cached_muted;
 	}
-      // 缓存过期时直接使用默认值（音量=1.0），不触发IPC
-      // 缓存更新由后台线程完成
+      // When cache expires, use default (volume=1.0), don't trigger IPC
+      // Cache update is done by background thread
     }
 
   if (outIsMuted)

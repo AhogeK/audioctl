@@ -9,7 +9,6 @@ add_executable(test_virtual_audio_device
         # 新增测试文件
         test_app_volume_control.c
         test_virtual_device_manager.c
-        test_aggregate_device_manager.c
         test_ipc_protocol.c
         test_ipc_client.c
 )
@@ -19,8 +18,6 @@ target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_device.c
         ${CMAKE_SOURCE_DIR}/src/app_volume_control.c
         ${CMAKE_SOURCE_DIR}/src/virtual_device_manager.c
-        ${CMAKE_SOURCE_DIR}/src/aggregate_device_manager.c
-        ${CMAKE_SOURCE_DIR}/src/aggregate_volume_proxy.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_server.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_client.c

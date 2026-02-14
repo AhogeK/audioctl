@@ -29,10 +29,10 @@ typedef struct ClientConnection
 
 static ClientConnection *g_connections = NULL;
 static IPCServerContext *g_server_ctx = NULL;
-// 【关键修复】添加互斥锁保护连接链表
+// Add mutex to protect connection list
 static pthread_mutex_t g_connections_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// 信号处理
+// Signal handling
 static void
 signal_handler (int sig)
 {
@@ -72,7 +72,7 @@ add_connection (int fd, pid_t pid)
   conn->fd = fd;
   conn->pid = pid;
 
-  // 【关键修复】使用互斥锁保护链表操作
+  // Use mutex to protect list operations
   pthread_mutex_lock (&g_connections_mutex);
   conn->next = g_connections;
   g_connections = conn;
@@ -81,15 +81,15 @@ add_connection (int fd, pid_t pid)
   return 0;
 }
 
-// 移除客户端连接
+// Remove client connection
 static void
 remove_connection (int fd)
 {
-  // 【关键修复】使用互斥锁保护链表操作
+  // Use mutex to protect list operations
   pthread_mutex_lock (&g_connections_mutex);
   ClientConnection **current = &g_connections;
 
-  // 【关键修复】防止链表损坏导致的无限循环，设置最大迭代次数
+  // Prevent infinite loop from corrupted list, set max iterations
   int max_iterations = 10000;
   int iterations = 0;
 
@@ -704,8 +704,8 @@ ipc_server_cleanup (IPCServerContext *ctx)
   if (ctx == NULL)
     return;
 
-  // 关闭所有连接
-  // 【关键修复】使用互斥锁保护清理操作
+  // Close all connections
+  // Use mutex to protect cleanup operation
   pthread_mutex_lock (&g_connections_mutex);
   while (g_connections != NULL)
     {

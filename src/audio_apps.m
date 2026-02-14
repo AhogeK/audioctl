@@ -1,23 +1,17 @@
 //
 // Created by AhogeK on 02/12/26.
 //
-// 【重要说明】应用检测架构限制：
-// 当前使用 Aggregate Device 模式（App -> Aggregate -> Virtual + Speaker）
-// 在此模式下，应用连接 Aggregate Device，Virtual Device
-// 作为子设备无法直接获取客户端列表。
+// 应用检测架构说明：
+// 使用串联模式（App -> Virtual -> Router -> Speaker）
+// 驱动通过 AddDeviceClient 可以准确知道哪些应用连接了 Virtual Device
 //
 // 本实现采用启发式方法：
 // 1. 查询所有前台应用（排除系统进程）
 // 2. 显示这些应用的音量控制状态
 // 3. 用户可以为任何应用设置音量，即使它当前没有播放音频
 //
-// 【未来改进】串联架构（App -> Virtual -> Router -> Speaker）
-// 在串联架构下，驱动可以通过 AddDeviceClient 准确知道哪些应用连接了 Virtual
-// Device
-//
 
 #include "audio_apps.h"
-#include "aggregate_device_manager.h"
 #include "virtual_device_manager.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -201,24 +195,13 @@ getFrontmostApps (AudioAppInfo **apps, UInt32 *appCount)
 	    result[index].bundleId[sizeof (result[index].bundleId) - 1] = '\0';
 	  }
 
-	// 默认设备（Aggregate Device 或默认输出）
-	AggregateDeviceInfo aggInfo;
-	if (aggregate_device_get_info (&aggInfo))
-	  {
-	    result[index].deviceId = aggInfo.deviceId;
-	  }
-	else
-	  {
-	    // 获取默认输出设备
-	    UInt32 dataSize = sizeof (AudioDeviceID);
-	    AudioObjectPropertyAddress address
-	      = {kAudioHardwarePropertyDefaultOutputDevice,
-		 kAudioObjectPropertyScopeGlobal,
-		 kAudioObjectPropertyElementMain};
-	    AudioObjectGetPropertyData (kAudioObjectSystemObject, &address, 0,
-					NULL, &dataSize,
-					&result[index].deviceId);
-	  }
+	// 获取默认输出设备
+	UInt32 dataSize = sizeof (AudioDeviceID);
+	AudioObjectPropertyAddress address
+	  = {kAudioHardwarePropertyDefaultOutputDevice,
+	     kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+	AudioObjectGetPropertyData (kAudioObjectSystemObject, &address, 0, NULL,
+				    &dataSize, &result[index].deviceId);
 
 	// 默认音量 100%
 	result[index].volume = 1.0f;

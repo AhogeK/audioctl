@@ -8,7 +8,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "aggregate_device_manager.h"
 #include "audio_control.h"
 #include "ipc/ipc_protocol.h"
 
@@ -276,14 +275,9 @@ virtual_device_is_active_output (void)
 
   AudioDeviceID defaultOutput = get_default_output_device ();
 
-  // 如果默认输出是虚拟设备，或者默认输出是聚合设备（且该聚合设备包含虚拟设备）
+  // 如果默认输出是虚拟设备，则认为虚拟设备处于激活状态
   if (defaultOutput == virtualDevice)
     return true;
-
-  if (aggregate_device_is_active ())
-    {
-      return true;
-    }
 
   return false;
 }
@@ -384,12 +378,12 @@ virtual_device_activate (void)
   return (status1 != noErr) ? status1 : status2;
 }
 
-// 【新架构】激活虚拟设备并启动 Router（串联模式）
+// Activate virtual device and start Router (serial mode)
 // App -> Virtual Device -> Router -> Physical Device
 OSStatus
 virtual_device_activate_with_router (void)
 {
-  // 0. 【修复】保存当前默认设备，以便后续恢复
+  // Save current default device for later restoration
   AudioDeviceID previousDevice = get_default_output_device ();
   if (previousDevice != kAudioObjectUnknown)
     {
@@ -397,8 +391,8 @@ virtual_device_activate_with_router (void)
       printf ("💾 已保存当前设备 ID=%d，供后续恢复\n", previousDevice);
     }
 
-  // 1. 【修复】使用 UID 查找虚拟设备，而不是硬编码 ID
-  // CoreAudio 重启后设备 ID 会重新分配
+  // Use UID to find virtual device, not hardcoded ID
+  // Device ID will be reassigned after CoreAudio restart
   AudioDeviceID virtualDevice = kAudioObjectUnknown;
   {
     AudioObjectPropertyAddress addr
@@ -423,9 +417,8 @@ virtual_device_activate_with_router (void)
 	    VIRTUAL_DEVICE_UID);
   }
 
-  // 2. 【关键修复】直接设置虚拟设备为默认，不查询其他设备
-  // 查询其他设备会导致 CoreAudio 状态改变，使设置失败
-
+  // Directly set virtual device as default, don't query other devices
+  // Querying other devices changes CoreAudio state and causes failure
   AudioObjectPropertyAddress propertyAddress
     = {kAudioHardwarePropertyDefaultOutputDevice,
        kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
@@ -485,14 +478,14 @@ virtual_device_activate_with_router (void)
       return kAudioHardwareUnspecifiedError;
     }
 
-  // 4. 【修复】不切换默认输入设备
-  // 根据用户需求，只切换 output，保持 input 不变
+  // Don't switch default input device
+  // According to user requirements, only switch output, keep input unchanged
   // propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
   // AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0,
   // NULL, sizeof(AudioDeviceID),
   //                            &virtualDevice);
 
-  // 5. 【修复】再次验证
+  // Verify the device was successfully set
   AudioDeviceID verifyOutput = get_default_output_device ();
   if (verifyOutput != virtualDevice)
     {
@@ -510,18 +503,18 @@ virtual_device_activate_with_router (void)
 OSStatus
 virtual_device_deactivate (void)
 {
-  // 【修复】首先尝试恢复之前保存的设备
+  // First try to restore previously saved device
   AudioDeviceID previousDevice = restore_previous_device ();
   if (previousDevice != kAudioObjectUnknown)
     {
-      // 验证设备是否仍然有效
+      // Verify device is still valid
       char uid[256] = {0};
       OSStatus verifyStatus
 	= get_device_uid (previousDevice, uid, sizeof (uid));
       if (verifyStatus == noErr && strstr (uid, VIRTUAL_DEVICE_UID) == NULL
 	  && strstr (uid, "Virtual") == NULL)
 	{
-	  // 设备有效且不是虚拟设备，恢复到该设备
+	  // Device is valid and not virtual, restore to it
 	  AudioObjectPropertyAddress propertyAddress
 	    = {kAudioHardwarePropertyDefaultOutputDevice,
 	       kAudioObjectPropertyScopeGlobal,

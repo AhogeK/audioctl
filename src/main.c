@@ -6,8 +6,6 @@
 #include <string.h>
 #include <sys/file.h>
 #include <unistd.h>
-#include "aggregate_device_manager.h"
-#include "aggregate_volume_proxy.h"
 #include "app_volume_control.h"
 #include "audio_apps.h"
 #include "audio_control.h"
@@ -62,7 +60,7 @@ kill_router (void)
   if (get_lock_file_path (lock_path, sizeof (lock_path)) != 0)
     return;
 
-  // 1. 尝试通过 PID 文件停止
+  // Try to stop via PID file
   FILE *fp = fopen (pid_path, "r");
   if (fp != NULL)
     {
@@ -80,10 +78,11 @@ kill_router (void)
       unlink (pid_path);
     }
 
-  // 2. 安全网：强制清理可能残留的进程（防止 PID 文件丢失导致多重启动）
+  // Safety net: force cleanup any residual processes
+  // (prevents multiple starts if PID file is lost)
   system ("pkill -f 'audioctl internal-route' >/dev/null 2>&1");
 
-  // 3. 清理锁文件（如果存在）
+  // Clean up lock file if it exists
   unlink (lock_path);
 }
 
@@ -487,37 +486,8 @@ printDeviceTypeAndChannels (const AudioDeviceInfo *info)
 }
 
 static void
-printAggregateVolume (void)
-{
-  AudioDeviceID physicalDevice = aggregate_device_get_physical_device ();
-  if (physicalDevice == kAudioObjectUnknown)
-    {
-      printf ("可调节 (未绑定物理设备)");
-      return;
-    }
-
-  AudioDeviceInfo physInfo;
-  if (getDeviceInfo (physicalDevice, &physInfo) != noErr)
-    {
-      printf ("可调节 (状态未知)");
-      return;
-    }
-
-  if (physInfo.hasVolumeControl)
-    {
-      printf ("%.1f%% (由 %s 代理)", physInfo.volume * 100.0, physInfo.name);
-    }
-  else
-    {
-      printf ("不可调节 (物理设备 %s 不支持)", physInfo.name);
-    }
-}
-
-static void
 printVolumeInfo (const AudioDeviceInfo *info)
 {
-  bool isAggregate = (strstr (info->name, "AudioCTL Aggregate") != NULL);
-
   if (info->deviceType == kDeviceTypeInput)
     {
       printf ("\n  输入音量: ");
@@ -539,11 +509,7 @@ printVolumeInfo (const AudioDeviceInfo *info)
     {
       printf ("\n  音量: ");
 
-      if (isAggregate)
-	{
-	  printAggregateVolume ();
-	}
-      else if (!info->hasVolumeControl)
+      if (!info->hasVolumeControl)
 	{
 	  printf ("不可调节");
 	}
@@ -814,28 +780,7 @@ handleVolumeSet (int argc, char *argv[])
       return 1;
     }
 
-  // 检查当前默认输出设备是否是 Aggregate Device
-  if (!isInput)
-    {
-      AggregateDeviceInfo aggInfo;
-      if (aggregate_device_get_info (&aggInfo) && aggInfo.isCreated
-	  && aggregate_device_get_current_default_output () == aggInfo.deviceId)
-	{
-	  // 当前默认是 Aggregate Device，使用音量代理设置
-	  OSStatus status = aggregate_volume_set (volume / 100.0f);
-	  if (status == noErr)
-	    {
-	      printf ("✅ 已将 AudioCTL Aggregate 音量设置为 %.1f%% "
-		      "(同步到物理设备)\n",
-		      volume);
-	      return 0;
-	    }
-
-	  printf ("错误：设置 AudioCTL Aggregate 音量失败: %d\n", status);
-	  return 1;
-	}
-    }
-
+  // 串联模式下，音量直接通过虚拟设备控制
   AudioDeviceID targetDeviceId;
   char *deviceName; // 修改为 char* 类型
   if (!findRunningDevice (isInput, &targetDeviceId, &deviceName))
@@ -914,14 +859,14 @@ handleSetCommand (int argc, char *argv[])
 static int
 handleAppVolumeCommands (int argc, char *argv[])
 {
-  // 【修复】串联架构下，检查虚拟设备是否激活，而不是 Aggregate Device
+  // 串联模式下，检查虚拟设备是否激活
   if (!virtual_device_is_active ())
     {
-      printf ("⚠️  Aggregate Device 未激活，无法使用应用音量控制\n");
+      printf ("⚠️  虚拟设备未激活，无法使用应用音量控制\n");
       if (strcmp (argv[1], "app-volumes") == 0)
 	{
 	  printf ("\n");
-	  aggregate_device_print_status ();
+	  virtual_device_print_status ();
 	  printf ("\n请运行: audioctl use-virtual 激活\n");
 	}
       else
@@ -992,20 +937,20 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 	  return 1;
 	}
 
-      // 【新架构】使用串联模式（Serial Mode）
-      // App -> Virtual Device -> Router -> Physical Speaker
-      // 这是实现应用分轨音量控制的必要条件
+      // Use serial mode: App -> Virtual Device -> Router -> Physical Speaker
+      // This is required for per-app volume control
 
-      // 【重要修复】不要在切换前查询当前物理设备！
-      // 查询当前默认设备会锁定 CoreAudio 状态，阻止后续切换
-      // 而是在激活成功后，Router 会自动绑定到当前系统默认的物理设备
+      // Important: do not query current physical device before switching!
+      // Querying default device locks CoreAudio state and prevents switching
+      // Instead, after activation, Router will automatically bind to current
+      // default physical device
 
-      // 1. 切换到串联模式（直接使用 Virtual Device 作为默认输出）
+      // Switch to serial mode (use Virtual Device as default output)
       if (virtual_device_activate_with_router () != noErr)
 	return 1;
 
-      // 2. 启动 Router 和 IPC 服务
-      // Router 会读取配置文件中保存的物理设备 UID
+      // Start Router and IPC services
+      // Router will read the physical device UID from config file
       char self_path[4096];
       uint32_t size = sizeof (self_path);
       if (_NSGetExecutablePath (self_path, &size) == 0)
@@ -1026,36 +971,6 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
       audio_router_stop ();
       // 恢复到物理设备
       return virtual_device_deactivate () == noErr ? 0 : 1;
-    }
-
-  if (strcmp (argv[1], "agg-status") == 0)
-    {
-      aggregate_device_print_status ();
-      return 0;
-    }
-
-  // 内部命令：删除 Aggregate Device（用于卸载脚本）
-  if (strcmp (argv[1], "internal-delete-aggregate") == 0)
-    {
-      if (aggregate_device_is_created ())
-	{
-	  OSStatus status = aggregate_device_destroy ();
-	  if (status == noErr)
-	    {
-	      printf ("✅ Aggregate Device 已删除\n");
-	      return 0;
-	    }
-	  else
-	    {
-	      fprintf (stderr, "❌ 删除 Aggregate Device 失败: %d\n", status);
-	      return 1;
-	    }
-	}
-      else
-	{
-	  printf ("ℹ️  Aggregate Device 不存在\n");
-	  return 0;
-	}
     }
 
   return 1;
@@ -1103,8 +1018,7 @@ main (const int argc, char *argv[])
     return handleAppVolumeCommands (argc, argv);
 
   if (strcmp (cmd, "virtual-status") == 0 || strcmp (cmd, "use-virtual") == 0
-      || strcmp (cmd, "use-physical") == 0 || strcmp (cmd, "agg-status") == 0
-      || strcmp (cmd, "internal-delete-aggregate") == 0)
+      || strcmp (cmd, "use-physical") == 0)
     {
       return handleVirtualDeviceCommands (argc, argv);
     }
@@ -1139,8 +1053,8 @@ main (const int argc, char *argv[])
       ftruncate (lock_fd, 0);
       write (lock_fd, pid_str, strlen (pid_str));
 
-      // 【新架构】启动串联模式 Router
-      // 读取绑定的物理设备 UID
+      // Start serial mode Router
+      // Load bound physical device UID
       char target_uid[256] = {0};
       if (!load_target_device_uid (target_uid, sizeof (target_uid)))
 	{

@@ -21,8 +21,6 @@ run_app_volume_control_tests (void);
 extern int
 run_virtual_device_manager_tests (void);
 extern int
-run_aggregate_device_manager_tests (void);
-extern int
 run_ipc_protocol_tests (void);
 extern int
 run_ipc_client_tests (void);
@@ -45,7 +43,6 @@ main ()
   // 新增测试
   failed += run_app_volume_control_tests ();
   failed += run_virtual_device_manager_tests ();
-  failed += run_aggregate_device_manager_tests ();
   failed += run_ipc_protocol_tests ();
   failed += run_ipc_client_tests ();
 
