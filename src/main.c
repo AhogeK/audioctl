@@ -436,6 +436,20 @@ printDeviceInfo (const AudioDeviceInfo *info)
 
   printf ("\n  传输类型: %s", getTransportTypeName (info->transportType));
 
+  // 【特殊处理】虚拟设备：显示绑定状态
+  if (info->transportType == kAudioDeviceTransportTypeVirtual)
+    {
+      char boundUid[256] = {0};
+      if (get_bound_physical_device_uid (boundUid, sizeof (boundUid)))
+	{
+	  printf ("\n  绑定状态: 已绑定到 %s", boundUid);
+	}
+      else
+	{
+	  printf ("\n  绑定状态: 未绑定");
+	}
+    }
+
   printVolumeInfo (info);
 
   printf ("\n  采样率: %d Hz", info->sampleRate);
@@ -867,6 +881,9 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 	      CFStringGetCString (uid_ref, physical_uid, sizeof (physical_uid),
 				  kCFStringEncodingUTF8);
 	      CFRelease (uid_ref);
+
+	      // 【关键】保存绑定的物理设备信息
+	      save_bound_physical_device (physical_uid);
 	    }
 	}
 
@@ -938,6 +955,9 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
       printf ("⏹️  停止 Audio Router...\n");
       kill_router ();
       printf ("✅ Router 已停止\n");
+
+      // 清除绑定信息
+      clear_binding_info ();
 
       kill_ipc_service ();
       // 恢复到物理设备

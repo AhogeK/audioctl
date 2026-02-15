@@ -36,11 +36,72 @@ is_router_process_running (void)
   return running;
 }
 
-#pragma mark - 设备状态持久化
+#pragma mark - 绑定信息持久化
 
 // 保存/恢复设备状态文件路径
 static const char *kDeviceStatePath
   = "/Users/ahogek/Library/Application Support/audioctl/last_device.txt";
+
+// 保存绑定的物理设备信息
+static const char *kBindingInfoPath
+  = "/Users/ahogek/Library/Application Support/audioctl/binding_info.txt";
+
+// 保存绑定的物理设备 UID
+OSStatus
+save_bound_physical_device (const char *physicalUid)
+{
+  // 确保目录存在
+  char dirPath[PATH_MAX];
+  snprintf (dirPath, sizeof (dirPath),
+	    "/Users/%s/Library/Application Support/audioctl", getlogin ());
+  mkdir (dirPath, 0755);
+
+  FILE *fp = fopen (kBindingInfoPath, "w");
+  if (!fp)
+    {
+      fprintf (stderr, "⚠️ 无法创建绑定信息文件: %s\n", kBindingInfoPath);
+      return -1;
+    }
+
+  fprintf (fp, "%s", physicalUid);
+  fclose (fp);
+  return noErr;
+}
+
+// 获取绑定的物理设备 UID
+bool
+get_bound_physical_device_uid (char *uid, size_t uidSize)
+{
+  FILE *fp = fopen (kBindingInfoPath, "r");
+  if (!fp)
+    {
+      return false;
+    }
+
+  if (fgets (uid, (int) uidSize, fp))
+    {
+      // 移除换行符
+      size_t len = strlen (uid);
+      if (len > 0 && uid[len - 1] == '\n')
+	{
+	  uid[len - 1] = '\0';
+	}
+      fclose (fp);
+      return strlen (uid) > 0;
+    }
+
+  fclose (fp);
+  return false;
+}
+
+// 清除绑定信息
+void
+clear_binding_info (void)
+{
+  unlink (kBindingInfoPath);
+}
+
+#pragma mark - 设备状态持久化
 
 // 保存当前默认输出设备到文件
 static OSStatus

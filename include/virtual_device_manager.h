@@ -88,6 +88,20 @@ virtual_device_deactivate (void);
 bool
 is_router_process_running (void);
 
+#pragma mark - 绑定信息持久化
+
+// 保存绑定的物理设备 UID
+OSStatus
+save_bound_physical_device (const char *physicalUid);
+
+// 获取绑定的物理设备 UID
+bool
+get_bound_physical_device_uid (char *uid, size_t uidSize);
+
+// 清除绑定信息
+void
+clear_binding_info (void);
+
 #pragma mark - 状态报告
 
 // 打印虚拟设备状态信息

@@ -3,6 +3,7 @@
 //
 
 #include "audio_control.h"
+#include "virtual_device_manager.h"
 
 // 获取音频设备属性
 static OSStatus
@@ -26,6 +27,92 @@ isPropertySettable (AudioDeviceID deviceId, AudioObjectPropertyScope scope,
   return AudioObjectIsPropertySettable (deviceId, &propertyAddress, settable);
 }
 
+// 获取设备 UID
+static bool
+getDeviceUidString (AudioDeviceID deviceId, char *uid, size_t uidSize)
+{
+  AudioObjectPropertyAddress addr
+    = {kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+       kAudioObjectPropertyElementMain};
+
+  CFStringRef uidRef = NULL;
+  UInt32 dataSize = sizeof (CFStringRef);
+  OSStatus status
+    = AudioObjectGetPropertyData (deviceId, &addr, 0, NULL, &dataSize, &uidRef);
+
+  if (status == noErr && uidRef != NULL)
+    {
+      CFStringGetCString (uidRef, uid, (CFIndex) uidSize,
+			  kCFStringEncodingUTF8);
+      CFRelease (uidRef);
+      return true;
+    }
+
+  return false;
+}
+
+// 检查设备是否是虚拟设备
+static bool
+isVirtualDevice (AudioDeviceID deviceId)
+{
+  char uid[256] = {0};
+  if (getDeviceUidString (deviceId, uid, sizeof (uid)))
+    {
+      return (strcmp (uid, VIRTUAL_DEVICE_UID) == 0);
+    }
+  return false;
+}
+
+// 根据 UID 查找设备 ID
+static AudioDeviceID
+find_device_by_uid (const char *uid)
+{
+  // 获取所有设备
+  UInt32 dataSize = 0;
+  AudioObjectPropertyAddress propertyAddress
+    = {kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal,
+       kAudioObjectPropertyElementMain};
+
+  OSStatus status
+    = AudioObjectGetPropertyDataSize (kAudioObjectSystemObject,
+				      &propertyAddress, 0, NULL, &dataSize);
+  if (status != noErr || dataSize == 0)
+    {
+      return kAudioObjectUnknown;
+    }
+
+  UInt32 numDevices = dataSize / sizeof (AudioDeviceID);
+  AudioDeviceID *deviceList = malloc (dataSize);
+  if (!deviceList)
+    {
+      return kAudioObjectUnknown;
+    }
+
+  status
+    = AudioObjectGetPropertyData (kAudioObjectSystemObject, &propertyAddress, 0,
+				  NULL, &dataSize, deviceList);
+  if (status != noErr)
+    {
+      free (deviceList);
+      return kAudioObjectUnknown;
+    }
+
+  AudioDeviceID result = kAudioObjectUnknown;
+  for (UInt32 i = 0; i < numDevices; i++)
+    {
+      char deviceUid[256] = {0};
+      if (getDeviceUidString (deviceList[i], deviceUid, sizeof (deviceUid))
+	  && strcmp (deviceUid, uid) == 0)
+	{
+	  result = deviceList[i];
+	  break;
+	}
+    }
+
+  free (deviceList);
+  return result;
+}
+
 // 获取设备音量的详细实现
 static void
 getVolumeInfo (AudioDeviceID deviceId, AudioDeviceType deviceType,
@@ -34,17 +121,38 @@ getVolumeInfo (AudioDeviceID deviceId, AudioDeviceType deviceType,
   *volume = 0.0f;
   *hasVolumeControl = false;
 
+  // 【特殊处理】虚拟设备：使用绑定的物理设备音量
+  if (isVirtualDevice (deviceId))
+    {
+      char boundUid[256] = {0};
+      if (get_bound_physical_device_uid (boundUid, sizeof (boundUid)))
+	{
+	  // 有绑定的物理设备，获取其音量
+	  AudioDeviceID physicalDevice = find_device_by_uid (boundUid);
+	  if (physicalDevice != kAudioObjectUnknown)
+	    {
+	      getVolumeInfo (physicalDevice, deviceType, volume,
+			     hasVolumeControl);
+	      return;
+	    }
+	}
+      // 没有绑定或找不到绑定设备，显示不可调节
+      *volume = 0.0f;
+      *hasVolumeControl = false;
+      return;
+    }
+
   AudioObjectPropertyScope scope = (deviceType == kDeviceTypeInput)
 				     ? kAudioDevicePropertyScopeInput
 				     : kAudioDevicePropertyScopeOutput;
 
   UInt32 dataSize = sizeof (Float32);
   Boolean isSettable = false;
-  OSStatus status;
 
   // 尝试获取主音量
-  status = isPropertySettable (deviceId, scope, kAudioObjectPropertyElementMain,
-			       &isSettable);
+  OSStatus status
+    = isPropertySettable (deviceId, scope, kAudioObjectPropertyElementMain,
+			  &isSettable);
   if (status == noErr && isSettable
       && getAudioProperty (deviceId, kAudioDevicePropertyVolumeScalar, scope,
 			   kAudioObjectPropertyElementMain, volume, &dataSize)
@@ -292,6 +400,33 @@ checkDeviceRunningStatus (AudioDeviceID deviceId, AudioDeviceInfo *info)
   if (status != noErr || !isAlive)
     {
       info->isRunning = false;
+      return;
+    }
+
+  // 【特殊处理】虚拟设备：只有当它是默认设备时才显示"使用中"
+  if (isVirtualDevice (deviceId))
+    {
+      switch (info->deviceType)
+	{
+	case kDeviceTypeInput:
+	  info->isRunning
+	    = isDefaultDevice (deviceId, kAudioDevicePropertyScopeInput);
+	  break;
+
+	case kDeviceTypeOutput:
+	  info->isRunning
+	    = isDefaultDevice (deviceId, kAudioDevicePropertyScopeOutput);
+	  break;
+
+	case kDeviceTypeInputOutput:
+	  info->isRunning
+	    = isDefaultDevice (deviceId, kAudioDevicePropertyScopeInput)
+	      || isDefaultDevice (deviceId, kAudioDevicePropertyScopeOutput);
+	  break;
+
+	default:
+	  info->isRunning = false;
+	}
       return;
     }
 
