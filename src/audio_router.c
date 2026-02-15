@@ -296,6 +296,18 @@ output_callback (AudioDeviceID inDevice, const AudioTimeStamp *inNow,
 
   rb_read (&g_router.ring_buffer, dst, frames, g_router.channels);
 
+  // 【增益补偿】应用输出增益，防止AGC导致的音量突增
+  // 增益值由启动时传入的物理设备音量决定
+  float gain
+    = atomic_load_explicit (&g_router.output_gain, memory_order_relaxed);
+  if (gain < 1.0f && gain > 0.0f)
+    {
+      for (uint32_t i = 0; i < frames * g_router.channels; i++)
+	{
+	  dst[i] *= gain;
+	}
+    }
+
   return noErr;
 }
 
@@ -424,6 +436,9 @@ audio_router_start (const char *physical_device_uid)
   atomic_store_explicit (&g_router.underrun_count, 0, memory_order_relaxed);
   atomic_store_explicit (&g_router.overrun_count, 0, memory_order_relaxed);
 
+  // 初始化输出增益为1.0（无增益）
+  atomic_store_explicit (&g_router.output_gain, 1.0f, memory_order_relaxed);
+
   // 记录启动时间
   g_router.start_time = get_time_us ();
 
@@ -518,6 +533,25 @@ audio_router_stop (void)
   rb_destroy (&g_router.ring_buffer);
 
   ROUTER_LOG_INFO ("✅ Router 已停止");
+}
+
+OSStatus
+audio_router_start_with_volume (const char *physical_device_uid,
+				float physical_volume)
+{
+  // 先调用标准启动函数
+  OSStatus status = audio_router_start (physical_device_uid);
+
+  if (status == noErr && physical_volume > 0.0f && physical_volume <= 1.0f)
+    {
+      // 设置输出增益为物理设备音量
+      // 这样可以补偿虚拟设备(默认100%)和物理设备音量之间的差异
+      atomic_store_explicit (&g_router.output_gain, physical_volume,
+			     memory_order_relaxed);
+      ROUTER_LOG_INFO ("🎚️  增益补偿: %.0f%%", physical_volume * 100.0f);
+    }
+
+  return status;
 }
 
 bool

@@ -56,6 +56,10 @@ typedef struct
   _Atomic uint32_t latency_ms;	// 当前延迟 (毫秒)
   _Atomic float watermark_peak; // Watermark 峰值 (0.0-1.0)
   _Atomic uint64_t start_time;	// 启动时间戳
+
+  // 音量增益补偿：物理设备音量 vs 虚拟设备默认音量(100%)的比率
+  // 例如物理设备50%，则 gain = 0.5，防止AGC误判导致的音量突增
+  _Atomic float output_gain;
 } AudioRouterContext;
 
 /**
@@ -79,12 +83,24 @@ audio_router_set_console_log_mode (bool enable);
 
 /**
  * 初始化并启动路由（绑定到指定的物理设备UID）
+ * 兼容旧接口，默认使用1.0增益
  *
  * @param physical_device_uid 目标物理设备的 UID
  * @return OSStatus 操作状态
  */
 OSStatus
 audio_router_start (const char *physical_device_uid);
+
+/**
+ * 初始化并启动路由（绑定到指定的物理设备UID）
+ *
+ * @param physical_device_uid 目标物理设备的 UID
+ * @param physical_volume 物理设备当前音量 (0.0-1.0)，用于增益补偿
+ * @return OSStatus 操作状态
+ */
+OSStatus
+audio_router_start_with_volume (const char *physical_device_uid,
+				float physical_volume);
 
 /**
  * 停止路由

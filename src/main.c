@@ -866,6 +866,7 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
       // 【关键】先获取当前物理设备（在切换前！）
       AudioDeviceID physical_device = get_default_output_device ();
       char physical_uid[256] = {0};
+      Float32 physical_volume = 1.0f; // 默认100%
       if (physical_device != kAudioObjectUnknown)
 	{
 	  AudioObjectPropertyAddress addr
@@ -885,17 +886,38 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 	      // 【关键】保存绑定的物理设备信息
 	      save_bound_physical_device (physical_uid);
 	    }
+
+	  // 【音量同步】获取物理设备当前音量
+	  AudioDeviceInfo device_info;
+	  if (getDeviceInfo (physical_device, &device_info) == noErr)
+	    {
+	      physical_volume = device_info.volume;
+	      printf ("🎚️  物理设备音量: %.0f%%\n", physical_volume * 100.0f);
+	    }
 	}
 
       // Switch to serial mode (use Virtual Device as default output)
       if (virtual_device_activate_with_router () != noErr)
 	return 1;
 
+      // 【音量同步】尝试同步音量到虚拟设备（静默处理，失败不提示）
+      // Router 层已应用增益补偿，此处仅为尝试通知系统期望音量
+      if (physical_volume < 1.0f)
+	{
+	  AudioDeviceID virtual_device = get_default_output_device ();
+	  if (virtual_device != kAudioObjectUnknown)
+	    {
+	      (void) setDeviceVolume (virtual_device, physical_volume);
+	      // 虚拟设备不支持标准音量控制是预期行为，静默处理
+	    }
+	}
+
       // 【关键】启动 Router，传入之前保存的物理设备 UID
       if (strlen (physical_uid) > 0)
 	{
 	  printf ("🔄 启动 Audio Router...\n");
-	  OSStatus router_status = audio_router_start (physical_uid);
+	  OSStatus router_status
+	    = audio_router_start_with_volume (physical_uid, physical_volume);
 	  if (router_status != noErr)
 	    {
 	      fprintf (stderr, "❌ 启动 Router 失败: %d\n", router_status);

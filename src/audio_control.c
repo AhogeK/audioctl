@@ -621,10 +621,7 @@ setDeviceVolume (AudioDeviceID deviceId, Float32 volume)
       status
 	= AudioObjectSetPropertyData (deviceId, &mutePropertyAddress, 0, NULL,
 				      sizeof (muteValue), &muteValue);
-      if (status != noErr)
-	{
-	  printf ("警告：无法取消设备的静音状态，错误码: %d\n", status);
-	}
+      (void) status; // 忽略取消静音的错误
     }
 
   // 尝试在主元素上设置 VolumeScalar
@@ -674,7 +671,6 @@ setDeviceVolume (AudioDeviceID deviceId, Float32 volume)
     }
   else
     {
-      printf ("错误：无法设置设备的音量，错误码: %d\n", status);
       return status;
     }
 }
