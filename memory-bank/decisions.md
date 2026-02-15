@@ -282,3 +282,20 @@
 * **尝试过的废案**: `pthread_mutex_t` (原因：引发系统级死锁或优先级反转)。
 * **最终决定**: 采用 C11 `<stdatomic.h>` 实现 Lock-free RingBuffer。
 * **后续影响**: 读写两端必须严格遵守单一生产者/单一消费者模型。
+
+---
+
+## 2026-02-15 - 明确 AI 安装权限边界
+
+* **场景上下文**: AI 在自动化流程中可能误执行安装脚本，导致系统驱动被意外替换或配置变更。
+* **问题风险**:
+    - `./scripts/install.sh install` 会将驱动文件复制到系统目录 `/Library/Audio/Plug-Ins/HAL/`
+    - 即使是 `--no-coreaudio-restart` 也会修改系统文件
+    - CoreAudio 驱动安装属于高风险操作，必须由人类确认后执行
+* **最终决定**:
+    - **AI 严禁执行**: 任何形式的 `install.sh` 脚本调用
+    - **AI 仅可执行**: `cmake --build` 或 `make` 进行纯编译检查
+    - **AI 职责**: 提供安装命令供开发者复制执行，提供调试指导而非亲自调试
+* **后续影响**:
+    - 更新 `AGENTS.md` 和 `.opencode/agents/audio_architect.md` 明确权限边界
+    - AI 专注于代码层面工作：编译、单测、代码审查、日志分析指导

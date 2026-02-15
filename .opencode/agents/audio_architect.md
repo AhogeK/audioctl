@@ -72,15 +72,26 @@ steps: 50
 
 ## 🔧 构建与质量门控 (Build & QA)
 
+**⚠️ AI 权限限制**: AI 仅执行编译检查，严禁执行任何安装脚本（包括 `--no-coreaudio-restart`）
+
 ```bash
-# 🚀 快速构建与重启 (Debug)
-./scripts/install.sh install --no-coreaudio-restart
+# 🚀 AI 可执行: 纯编译检查（不安装）
+cd cmake-build-debug && cmake --build . --target audioctl 2>&1
 
 # 🧪 运行测试 (必须全绿)
 cd cmake-build-debug && ctest --output-on-failure
 
 # 🎨 强制代码格式化 (LLVM Style)
 find src include tests -name "*.[chm]" | xargs clang-format -i
+```
+
+**人类执行（安装与测试）**:
+```bash
+# 开发者执行: 完整安装（重启 coreaudiod）
+./scripts/install.sh install
+
+# 开发者执行: 查看实时日志
+audioctl internal-route
 ```
 
 * **错误处理**: 显式检查 `OSStatus` / `kern_return_t`。使用 Fail Fast 模式 `if (status != noErr) return status;`。
