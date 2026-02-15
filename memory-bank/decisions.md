@@ -247,6 +247,35 @@
 
 ---
 
+## 2026-02-15 - 虚拟设备绑定信息持久化机制
+
+* **场景上下文**: 用户反馈虚拟设备在 `use-virtual` 前后状态显示不清晰，需要知道当前绑定到哪个物理设备，以及音量应该反映物理设备状态。
+* **尝试过的废案**:
+    - 直接查询 CoreAudio 属性（无法直接获取绑定关系）
+    - 在内存中保存绑定状态（进程重启后丢失）
+* **最终决定**:
+    - 在 `~/Library/Application Support/audioctl/binding_info.txt` 持久化绑定的物理设备 UID
+    - `use-virtual` 时保存，`use-physical` 时清除
+    - 虚拟设备音量通过查找绑定的物理设备并获取其实际音量
+    - 显示格式："绑定状态: 已绑定到 [设备名]" 或 "绑定状态: 未绑定"
+* **后续影响**: 绑定信息跨进程持久化，重启 audioctl 后仍能保持状态一致。
+
+---
+
+## 2026-02-15 - `internal-route` 命令行为重构
+
+* **场景上下文**: 原 `internal-route` 设计有缺陷，用户无法方便地查看已运行的后台 Router 日志。
+* **尝试过的废案**:
+    - 直接运行 `internal-route` 启动前台 Router（与后台 Router 冲突）
+    - 提示用户使用 `log stream` 命令（不够友好）
+* **最终决定**:
+    - 无参数运行 `internal-route`：自动检测后台 Router，若存在则执行 `log stream --process audioctl` 显示实时日志
+    - 带 `--router-target=` 参数：后台启动模式（由 `use-virtual` 调用）
+    - 检测到虚拟设备为默认设备时，提示正确的日志查看方式
+* **后续影响**: 用户可以在 `use-virtual` 后直接运行 `audioctl internal-route` 查看实时日志，体验更流畅。
+
+---
+
 ## [日期] - [决策简述，例如：放弃互斥锁改用无锁环形队列]
 
 * **场景上下文**: 在 `AudioDeviceIOProc` 中遇到高频抢占导致的爆音。
