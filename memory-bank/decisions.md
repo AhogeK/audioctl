@@ -276,7 +276,22 @@
 
 ---
 
-## [日期] - [决策简述，例如：放弃互斥锁改用无锁环形队列]
+## 2026-02-16 - use-virtual 音量突增问题（未解决）
+
+* **场景上下文**: 切换到虚拟设备时，声音会突然变大然后恢复。
+* **尝试过的废案**:
+    1. 驱动默认音量 100→0 + setDeviceVolume 同步（setDeviceVolume 对虚拟设备不生效，返回 kAudioHardwareUnsupportedOperationError）
+    2. Router output_callback 添加静音处理（无效，音量突增发生在 Router 启动瞬间）
+    3. 优化启动顺序：IPC → 虚拟设备(静音) → Router → 同步音量（导致完全无声）
+    4. 驱动默认音量 100→50（未验证）
+* **当前状态**: 问题未解决，需要进一步分析
+* **根因分析**:
+    - 虚拟设备的音量属性设置 (`SetPropertyData` for `kAudioDevicePropertyVolumeScalar`) 与驱动内部 `volumeControlValue` 是两套机制
+    - CoreAudio 可能在驱动属性设置完成前就已经开始播放音频
+    - 需要从驱动层 `volumeControlValue` 同步时机入手
+* **建议方向**: 
+    - 添加淡入效果 (fade-in) 掩盖突增
+    - 或在驱动 StartIO 前确保音量已正确设置
 
 * **场景上下文**: 在 `AudioDeviceIOProc` 中遇到高频抢占导致的爆音。
 * **尝试过的废案**: `pthread_mutex_t` (原因：引发系统级死锁或优先级反转)。
