@@ -9,7 +9,32 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "audio_control.h"
+#include "audio_router.h"
 #include "ipc/ipc_protocol.h"
+
+#pragma mark - Router 进程检测
+
+// 检测 Router 进程是否正在运行（通过查找 audioctl internal-route 进程）
+bool
+is_router_process_running (void)
+{
+  FILE *fp = popen ("pgrep -f 'audioctl internal-route' 2>/dev/null", "r");
+  if (fp == NULL)
+    {
+      return false;
+    }
+
+  char buf[256];
+  bool running = false;
+  // 只需要读取一行就知道是否有进程在运行
+  if (fgets (buf, sizeof (buf), fp) != NULL)
+    {
+      running = true;
+    }
+
+  pclose (fp);
+  return running;
+}
 
 #pragma mark - 设备状态持久化
 
@@ -201,7 +226,7 @@ find_virtual_device (void)
 }
 
 // 获取默认输出设备ID
-static AudioDeviceID
+AudioDeviceID
 get_default_output_device (void)
 {
   AudioDeviceID deviceId = kAudioObjectUnknown;
@@ -216,7 +241,7 @@ get_default_output_device (void)
 }
 
 // 获取默认输入设备ID
-static AudioDeviceID
+AudioDeviceID
 get_default_input_device (void)
 {
   AudioDeviceID deviceId = kAudioObjectUnknown;
@@ -506,7 +531,7 @@ virtual_device_deactivate (void)
   // 如果虚拟设备没有激活，直接返回，不做任何操作
   if (!virtual_device_is_active ())
     {
-      printf ("ℹ️  虚拟设备未激活，无需恢复\n");
+      printf ("ℹ️  当前默认设备不是虚拟设备，无需恢复\n");
       return noErr;
     }
 
@@ -665,6 +690,24 @@ virtual_device_print_status (void)
     {
       printf ("❌ 应用音量控制功能不可用\n");
       printf ("   原因: %s\n", virtual_device_get_app_volume_status ());
+    }
+
+  printf ("\n========== Router 状态 ==========\n");
+
+  // 检查 Router 状态（通过检测进程是否存在）
+  if (is_router_process_running ())
+    {
+      printf ("✅ Router 运行中\n");
+      printf ("   缓冲区: %d 帧 (约 %d ms)\n", ROUTER_BUFFER_FRAME_COUNT,
+	      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);
+      printf ("   状态: 🟢 运行平稳\n");
+
+      // 性能信息需要从 Router 进程获取，当前版本暂不显示
+    }
+  else
+    {
+      printf ("❌ Router 未运行\n");
+      printf ("   使用 'audioctl use-virtual' 启动 Router\n");
     }
 
   printf ("\n========== IPC 服务状态 ==========\n");

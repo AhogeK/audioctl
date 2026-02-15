@@ -11,9 +11,11 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 
-// 环形缓冲区大小（约 170ms @ 48kHz，双声道）
-#define ROUTER_BUFFER_FRAME_COUNT 8192
+// 环形缓冲区大小（约 42ms @ 48kHz，双声道）- 优化延迟
+#define ROUTER_BUFFER_FRAME_COUNT 2048
 #define ROUTER_MAX_CHANNELS 2
+// 位掩码：2048-1 = 0x7FF，用于快速索引
+#define ROUTER_BUFFER_MASK (ROUTER_BUFFER_FRAME_COUNT * ROUTER_MAX_CHANNELS - 1)
 
 // 环形缓冲区结构
 typedef struct
@@ -22,6 +24,10 @@ typedef struct
   uint32_t capacity;
   atomic_uint write_pos;
   atomic_uint read_pos;
+  // 性能监控
+  atomic_uint peak_usage;	// 峰值使用率 (0-100%)
+  atomic_uint current_usage;	// 当前使用率
+  atomic_uint samples_buffered; // 当前缓存的采样数
 } RouterRingBuffer;
 
 // Router 上下文
@@ -41,11 +47,35 @@ typedef struct
   uint32_t channels;
   uint32_t bits_per_channel;
 
-  // 统计信息
-  uint64_t frames_transferred;
-  uint32_t underrun_count;
-  uint32_t overrun_count;
+  // 统计信息 (使用原子变量确保线程安全)
+  _Atomic uint64_t frames_transferred;
+  _Atomic uint32_t underrun_count;
+  _Atomic uint32_t overrun_count;
+
+  // 性能监控
+  _Atomic uint32_t latency_ms;	// 当前延迟 (毫秒)
+  _Atomic float watermark_peak; // Watermark 峰值 (0.0-1.0)
+  _Atomic uint64_t start_time;	// 启动时间戳
 } AudioRouterContext;
+
+/**
+ * 获取 Router 性能监控信息
+ *
+ * @param latency_ms 当前延迟毫秒数
+ * @param watermark_peak 缓冲区使用峰值 (0.0-1.0)
+ * @param buffered_frames 当前缓存帧数
+ * @return 成功返回 true
+ */
+bool
+audio_router_get_performance_info (uint32_t *latency_ms, float *watermark_peak,
+				   uint32_t *buffered_frames);
+
+/**
+ * 设置日志输出模式
+ * @param enable true 使用控制台 printf 输出，false 使用 os_log
+ */
+void
+audio_router_set_console_log_mode (bool enable);
 
 /**
  * 初始化并启动路由（绑定到指定的物理设备UID）

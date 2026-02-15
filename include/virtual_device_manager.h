@@ -24,6 +24,16 @@ typedef struct
 #define VIRTUAL_DEVICE_UID "0E1D42AE-F2ED-4A48-9624-C770025E32A4"
 #define VIRTUAL_DEVICE_NAME "Virtual Audio Device"
 
+#pragma mark - 辅助函数
+
+// 获取当前默认输出设备ID
+AudioDeviceID
+get_default_output_device (void);
+
+// 获取当前默认输入设备ID
+AudioDeviceID
+get_default_input_device (void);
+
 #pragma mark - 设备检测
 
 // 检测虚拟设备是否安装
@@ -71,6 +81,12 @@ virtual_device_activate_with_router (void);
 // 恢复到物理设备（查找第一个非虚拟设备设为默认）
 OSStatus
 virtual_device_deactivate (void);
+
+#pragma mark - Router 进程检测
+
+// 检测 Router 进程是否正在运行（通过查找 audioctl internal-route 进程）
+bool
+is_router_process_running (void);
 
 #pragma mark - 状态报告
 

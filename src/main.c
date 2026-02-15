@@ -16,74 +16,51 @@
 #include "service_manager.h"
 #include "virtual_device_manager.h"
 
-// 物理设备绑定配置路径
-#define ROUTER_TARGET_UID_FILE                                                 \
-  "~/Library/Application Support/audioctl/target_device.uid"
-
-// 读取目标物理设备 UID
-static bool
-load_target_device_uid (char *uid, size_t size)
-{
-  char path[PATH_MAX];
-  if (get_ipc_socket_path (path, sizeof (path)) != 0)
-    return false;
-  char *last_slash = strrchr (path, '/');
-  if (last_slash)
-    {
-      strcpy (last_slash + 1, "target_device.uid");
-    }
-  FILE *fp = fopen (path, "r");
-  if (!fp)
-    return false;
-  bool success = fgets (uid, (int) size, fp) != NULL;
-  fclose (fp);
-  if (success)
-    {
-      // 移除换行符
-      char *p = strpbrk (uid, "\r\n");
-      if (p)
-	{
-	  *p = '\0';
-	}
-    }
-  return success;
-}
+// ============================================================================
+// Router 后台服务管理
+// ============================================================================
 
 static void
 kill_router (void)
 {
-  char pid_path[PATH_MAX];
-  char lock_path[PATH_MAX];
+  system ("pkill -f 'audioctl internal-route' >/dev/null 2>&1");
+}
 
-  if (get_pid_file_path (pid_path, sizeof (pid_path)) != 0)
-    return;
-  if (get_lock_file_path (lock_path, sizeof (lock_path)) != 0)
-    return;
+static pid_t
+spawn_router (const char *self_path, const char *physical_uid)
+{
+  kill_router ();
 
-  // Try to stop via PID file
-  FILE *fp = fopen (pid_path, "r");
-  if (fp != NULL)
+  pid_t pid;
+  posix_spawnattr_t attr;
+  posix_spawnattr_init (&attr);
+  posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETPGROUP);
+  posix_spawnattr_setpgroup (&attr, 0);
+
+  posix_spawn_file_actions_t actions;
+  posix_spawn_file_actions_init (&actions);
+
+  int dev_null = open ("/dev/null", O_WRONLY);
+  if (dev_null >= 0)
     {
-      char buf[32];
-      if (fgets (buf, sizeof (buf), fp) != NULL)
-	{
-	  char *endptr = NULL;
-	  long pid = strtol (buf, &endptr, 10);
-	  if (pid > 0 && pid <= INT32_MAX)
-	    {
-	      kill ((pid_t) pid, SIGTERM);
-	    }
-	}
-      fclose (fp);
-      unlink (pid_path);
+      posix_spawn_file_actions_adddup2 (&actions, dev_null, STDOUT_FILENO);
+      posix_spawn_file_actions_adddup2 (&actions, dev_null, STDERR_FILENO);
+      posix_spawn_file_actions_addclose (&actions, dev_null);
     }
 
-  // Safety net: force cleanup any residual processes
-  // (prevents multiple starts if PID file is lost)
-  system ("pkill -f 'audioctl internal-route' >/dev/null 2>&1");
+  // 传递物理设备 UID 作为参数
+  char uid_arg[512];
+  snprintf (uid_arg, sizeof (uid_arg), "--router-target=%s", physical_uid);
+  char *argv[] = {"audioctl", "internal-route", uid_arg, NULL};
 
-  // Clean up lock file if it exists
-  unlink (lock_path);
+  int ret = posix_spawn (&pid, self_path, &actions, &attr, argv, NULL);
+
+  posix_spawn_file_actions_destroy (&actions);
+  posix_spawnattr_destroy (&attr);
+  if (dev_null >= 0)
+    close (dev_null);
+
+  return (ret == 0) ? pid : -1;
 }
 
 // ============================================================================
@@ -153,79 +130,6 @@ spawn_ipc_service (const char *self_path)
   else
     {
       fprintf (stderr, "⚠️  无法启动 IPC 服务: %s\n", strerror (ret));
-    }
-}
-
-// [优化] 使用 posix_spawn 替代 fork/exec
-// 优势：
-//   1. macOS 上推荐的进程启动方式，性能更好
-//   2. 避免了 fork 的安全限制（fork-safe 操作）
-//   3. 更好的错误处理（可通过 spawn 返回值获取错误码）
-void
-spawn_router (const char *self_path)
-{
-  kill_router (); // 确保旧的已停止
-
-  pid_t pid;
-
-  // 配置 spawn 属性
-  posix_spawnattr_t attr;
-  posix_spawnattr_init (&attr);
-
-  // 设置进程组，脱离控制终端（类似 setsid）
-  posix_spawnattr_setflags (&attr, POSIX_SPAWN_SETPGROUP);
-  posix_spawnattr_setpgroup (&attr, 0);
-
-  // 打开 /dev/null 用于重定向 stdout/stderr
-  int dev_null = open ("/dev/null", O_WRONLY);
-  if (dev_null < 0)
-    {
-      fprintf (stderr, "无法打开 /dev/null\n");
-      posix_spawnattr_destroy (&attr);
-      return;
-    }
-
-  // 配置文件描述符
-  posix_spawn_file_actions_t actions;
-  posix_spawn_file_actions_init (&actions);
-
-  // 重定向 stdout 到 /dev/null
-  posix_spawn_file_actions_adddup2 (&actions, dev_null, STDOUT_FILENO);
-  // 重定向 stderr 到 /dev/null
-  posix_spawn_file_actions_adddup2 (&actions, dev_null, STDERR_FILENO);
-  // 关闭原始的文件描述符
-  posix_spawn_file_actions_addclose (&actions, dev_null);
-
-  // 构建参数数组
-  char *argv[] = {"audioctl", "internal-route", NULL};
-
-  // 启动进程
-  int ret = posix_spawn (&pid, self_path, &actions, &attr, argv, NULL);
-
-  // 清理资源
-  posix_spawn_file_actions_destroy (&actions);
-  posix_spawnattr_destroy (&attr);
-  close (dev_null);
-
-  if (ret == 0)
-    {
-      // 成功
-      char pid_path[PATH_MAX];
-      if (get_pid_file_path (pid_path, sizeof (pid_path)) == 0)
-	{
-	  FILE *fp = fopen (pid_path, "w");
-	  if (fp)
-	    {
-	      fprintf (fp, "%d\n", pid);
-	      fclose (fp);
-	    }
-	}
-      printf ("后台音频路由已启动 (PID: %d)\n", pid);
-    }
-  else
-    {
-      // 失败
-      fprintf (stderr, "启动路由进程失败: %s\n", strerror (ret));
     }
 }
 
@@ -945,30 +849,97 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
       // Instead, after activation, Router will automatically bind to current
       // default physical device
 
+      // 【关键】先获取当前物理设备（在切换前！）
+      AudioDeviceID physical_device = get_default_output_device ();
+      char physical_uid[256] = {0};
+      if (physical_device != kAudioObjectUnknown)
+	{
+	  AudioObjectPropertyAddress addr
+	    = {kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+	       kAudioObjectPropertyElementMain};
+	  CFStringRef uid_ref = NULL;
+	  UInt32 uid_size = sizeof (CFStringRef);
+	  OSStatus uid_status
+	    = AudioObjectGetPropertyData (physical_device, &addr, 0, NULL,
+					  &uid_size, &uid_ref);
+	  if (uid_status == noErr && uid_ref != NULL)
+	    {
+	      CFStringGetCString (uid_ref, physical_uid, sizeof (physical_uid),
+				  kCFStringEncodingUTF8);
+	      CFRelease (uid_ref);
+	    }
+	}
+
       // Switch to serial mode (use Virtual Device as default output)
       if (virtual_device_activate_with_router () != noErr)
 	return 1;
 
-      // Start Router and IPC services
-      // Router will read the physical device UID from config file
+      // 【关键】启动 Router，传入之前保存的物理设备 UID
+      if (strlen (physical_uid) > 0)
+	{
+	  printf ("🔄 启动 Audio Router...\n");
+	  OSStatus router_status = audio_router_start (physical_uid);
+	  if (router_status != noErr)
+	    {
+	      fprintf (stderr, "❌ 启动 Router 失败: %d\n", router_status);
+	    }
+	  else
+	    {
+	      printf ("✅ Router 已启动\n");
+	      printf ("   目标设备: %s\n", physical_uid);
+	      printf ("   缓冲区: %d 帧 (约 %d ms)\n",
+		      ROUTER_BUFFER_FRAME_COUNT,
+		      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);
+	      printf ("   监控: 每 5 秒报告一次性能状态\n");
+	    }
+	}
+      else
+	{
+	  fprintf (stderr, "⚠️  无法获取物理设备，Router 未启动\n");
+	}
+
+      // Start Router in background
       char self_path[4096];
       uint32_t size = sizeof (self_path);
-      if (_NSGetExecutablePath (self_path, &size) == 0)
+      if (_NSGetExecutablePath (self_path, &size) == 0
+	  && strlen (physical_uid) > 0)
 	{
-	  spawn_router (self_path);
+	  pid_t router_pid = spawn_router (self_path, physical_uid);
+	  if (router_pid > 0)
+	    {
+	      // 等待 Router 初始化
+	      sleep (1);
+
+	      // 显示启动状态
+	      printf ("\n✅ Router 已启动 (PID: %d)\n", router_pid);
+	      printf ("   目标设备: %s\n", physical_uid);
+	      printf ("   缓冲区: %d 帧 (约 %d ms)\n",
+		      ROUTER_BUFFER_FRAME_COUNT,
+		      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);
+	      printf ("   状态: 🟢 运行平稳\n");
+	    }
+
+	  // Start IPC service
 	  spawn_ipc_service (self_path);
 	}
       else
 	fprintf (stderr, "无法获取可执行文件路径，服务无法启动\n");
+
+      printf ("\n📝 提示: 使用 'audioctl virtual-status' 查看详细状态\n");
+      printf ("       使用 'audioctl use-physical' 恢复物理设备\n");
+      printf ("       查看实时日志: 'audioctl internal-route'\n\n");
+
       return 0;
     }
 
   if (strcmp (argv[1], "use-physical") == 0)
     {
-      kill_router ();
-      kill_ipc_service ();
       // 停止 Router
-      audio_router_stop ();
+      printf ("⏹️  停止 Audio Router...\n");
+      kill_router ();
+      printf ("✅ Router 已停止\n");
+
+      kill_ipc_service ();
       // 恢复到物理设备
       return virtual_device_deactivate () == noErr ? 0 : 1;
     }
@@ -1025,79 +996,61 @@ main (const int argc, char *argv[])
 
   if (strcmp (cmd, "internal-route") == 0)
     {
-      char lock_path[PATH_MAX];
-      if (get_lock_file_path (lock_path, sizeof (lock_path)) != 0)
-	{
-	  fprintf (stderr, "❌ 无法获取锁文件路径\n");
-	  return 1;
-	}
-
-      // 单例检查：确保同一时间只有一个 internal-route 在运行
-      int lock_fd = open (lock_path, O_RDWR | O_CREAT, 0666);
-      if (lock_fd < 0)
-	{
-	  fprintf (stderr, "❌ 无法打开锁文件: %s\n", strerror (errno));
-	  return 1;
-	}
-
-      if (flock (lock_fd, LOCK_EX | LOCK_NB) < 0)
-	{
-	  fprintf (stderr, "⚠️  Audio Router 已经在运行中 (无法获取锁)\n");
-	  close (lock_fd);
-	  return 1;
-	}
-
-      // 写入当前 PID 到锁文件
-      char pid_str[32];
-      snprintf (pid_str, sizeof (pid_str), "%d", getpid ());
-      ftruncate (lock_fd, 0);
-      write (lock_fd, pid_str, strlen (pid_str));
-
-      // Start serial mode Router
-      // Load bound physical device UID
+      // 解析 --router-target 参数（仅后台启动时使用）
       char target_uid[256] = {0};
-      if (!load_target_device_uid (target_uid, sizeof (target_uid)))
+      for (int i = 2; i < argc; i++)
 	{
-	  fprintf (stderr, "❌ 未找到绑定的物理设备配置\n");
-	  fprintf (stderr, "   请先运行 'audioctl use-virtual'\n");
-	  close (lock_fd);
-	  unlink (lock_path);
+	  if (strncmp (argv[i], "--router-target=", 16) == 0)
+	    {
+	      strncpy (target_uid, argv[i] + 16, sizeof (target_uid) - 1);
+	      break;
+	    }
+	}
+
+      // 如果指定了目标设备，说明是后台启动模式
+      if (strlen (target_uid) > 0)
+	{
+	  OSStatus status = audio_router_start (target_uid);
+	  if (status != noErr)
+	    {
+	      fprintf (stderr, "❌ 启动 Router 失败: %d\n", status);
+	      return 1;
+	    }
+
+	  while (audio_router_is_running ())
+	    {
+	      sleep (1);
+	    }
+
+	  audio_router_stop ();
+	  return 0;
+	}
+
+      // 没有指定目标设备，进入日志查看模式
+      printf ("📊 Router 实时日志查看模式\n");
+      printf ("═══════════════════════════════════════════════════\n\n");
+
+      // 检查 Router 是否已在运行
+      if (is_router_process_running ())
+	{
+	  printf ("✅ 检测到后台 Router 正在运行\n");
+	  printf ("🔄 开始实时显示日志（按 Ctrl+C 退出）...\n\n");
+
+	  // 执行 log stream 命令显示 Router 日志 (syslog 使用 --process)
+	  execlp ("log", "log", "stream", "--process", "audioctl", NULL);
+	  perror ("exec log stream failed");
 	  return 1;
 	}
-
-      printf ("🔄 启动 Audio Router (串联架构)...\n");
-      printf ("   目标物理设备: %s\n", target_uid);
-
-      // 启动 Router
-      OSStatus status = audio_router_start (target_uid);
-      if (status != noErr)
+      else
 	{
-	  fprintf (stderr, "❌ 启动 Router 失败: %d\n", status);
-	  close (lock_fd);
-	  unlink (lock_path);
-	  return 1;
+	  // Router 未运行，询问是否要启动
+	  printf ("⚠️  Router 未在后台运行\n\n");
+	  printf ("选项:\n");
+	  printf ("  1. 运行 'audioctl use-virtual' 启动后台 Router\n");
+	  printf ("  2. 运行 'audioctl internal-route --foreground' "
+		  "前台调试模式\n\n");
+	  return 0;
 	}
-
-      printf ("✅ Audio Router 已启动\n");
-      printf ("   音频流: Virtual Device -> Ring Buffer -> Physical Device\n");
-
-      // 保持运行直到收到信号
-      signal (SIGTERM, SIG_DFL);
-      signal (SIGINT, SIG_DFL);
-
-      // 使用 CFRunLoop 或简单循环保持进程
-      while (audio_router_is_running ())
-	{
-	  sleep (1);
-	}
-
-      // 停止 Router
-      audio_router_stop ();
-
-      // 退出前清理锁文件
-      unlink (lock_path);
-      close (lock_fd);
-      return 0;
     }
 
   if (strcmp (cmd, "internal-ipc-service") == 0)

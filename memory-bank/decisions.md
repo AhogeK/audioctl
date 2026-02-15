@@ -71,6 +71,182 @@
 
 ---
 
+## 2026-02-15 - 噪音问题根因分析
+
+* **场景上下文**: 用户测试发现，使用 Discord 时出现明显噪音/卡顿；不使用 Discord 时音频正常。
+* **问题本质**: 驱动本身工作正常，问题出在特定应用（Discord）的音频行为与驱动的兼容性。
+* **可能原因分析**:
+    1. **多流/多客户端**: Discord 可能同时创建多个音频流（输入+输出或多个输出流），每个流有不同的 `clientID`
+    2. **采样率/格式不匹配**: Discord 可能使用了与默认不同的采样率（如 48kHz vs 44.1kHz）或格式
+    3. **调度抖动**: Discord 的音频回调时机可能与其他应用不同，导致时序问题
+    4. **客户端识别问题**: 当前驱动使用单一的全局 ring buffer，当多个客户端同时写入时可能产生竞争
+* **验证方法**:
+    - 使用 `sudo log stream` 监控 Discord 音频创建过程
+    - 检查 Discord 是否使用了不同的采样率
+    - 确认是否有多个 clientID 同时活跃
+* **待解决**: 需要针对多客户端场景进行优化
+
+---
+
+## 2026-02-15 - Router 架构重构：移除 internal-route 子进程
+
+* **场景上下文**: 之前 Router 通过 `internal-route` 子进程启动，增加了进程管理和通信复杂度。现在改为直接调用，简化架构。
+* **变更内容**:
+    - 移除 `internal-route` 内部命令处理
+    - 移除 `spawn_router()` 和 `kill_router()` 函数
+    - 新增 `start_router_service()` 和 `stop_router_service()` 直接管理 Router
+    - `use-virtual` 直接启动 Router，显示状态信息
+    - `use-physical` 直接停止 Router，显示停止信息
+    - 在头文件中暴露 `get_default_output_device()` 和 `get_default_input_device()`
+* **用户体验提升**:
+    - 启动时显示 Router 状态和性能监控信息
+    - 统一的命令入口：`use-virtual` 启动，`use-physical` 停止
+    - 更易理解的服务状态
+* **代码简化**: 移除了子进程管理、PID 文件、锁文件等复杂逻辑
+
+---
+
+## 2026-02-15 - 移除废弃的 Audio Router 架构
+
+* **场景上下文**: Audio Router 是基于早期串联架构（Virtual Device -> Ring Buffer -> Physical Device）的外部进程方案，但现在驱动已采用
+  loopback 模式，Router 已无用。
+* **已废弃代码**:
+    - `src/audio_router.c` - 外部 Router 实现
+    - `include/audio_router.h` - Router 头文件
+    - `spawn_router()` / `kill_router()` / `load_target_device_uid()` 函数
+    - `internal-route` 命令处理
+    - `virtual_device_activate_with_router()` 函数
+* **架构变更**:
+    - 驱动使用内置 loopback buffer (gLoopbackBuffer)
+    - WriteMix 将音频写入 loopback buffer
+    - ReadInput 从 loopback buffer 读取
+    - 无需外部进程转发音频
+* **命令变更**:
+    - `use-virtual` 不再启动 Router，只激活虚拟设备和 IPC 服务
+    - `use-physical` 不再停止 Router
+    - 移除 `internal-route` 内部命令
+* **结果**: 代码简化，架构清晰，避免维护废弃代码
+
+---
+
+## 2026-02-15 - Loopback Buffer 关键修复
+
+* **场景上下文**: 驱动使用 loopback buffer 实现音频环回，但存在严重的竞争条件和缓冲区管理问题，可能导致无声、噪音或数据损坏。
+* **发现的问题**:
+    1. **缓冲区过小**: 16384 采样 (8192 帧) 仅约 170ms，多客户端时容易溢出
+    2. **读写竞争**: 没有正确的 memory order，CPU 可能重排序操作，导致读取半写入数据
+    3. **指针未复位**: StartIO 中未清零缓冲区，重启音频可能读到旧数据
+    4. **溢出处理缺失**: 写入时不检查是否会追上读指针，导致数据覆盖
+    5. **欠载处理粗糙**: 数据不足时直接输出静音，没有尝试读取部分数据
+* **修复方案**:
+    1. **增大 buffer**: 65536 采样 (32768 帧) = ~682ms @ 48kHz stereo
+    2. **添加 memory barrier**:
+        - WriteMix: `memory_order_acquire` 读取, `memory_order_release` 写入
+        - ReadInput: `memory_order_acquire` 读取两个指针, `memory_order_release` 更新 readPos
+    3. **StartIO 清零**: 第一个客户端启动时 memset 缓冲区为 0
+    4. **溢出保护**: 写入前检查是否会追上 readPos（留出 512 采样安全边际），会则丢弃新数据
+    5. **部分数据读取**: 数据不足时读取可用部分，剩余填充静音，减少卡顿感
+* **代码变更**: `src/driver/virtual_audio_driver.c`
+    - 宏定义: `LOOPBACK_BUFFER_SAMPLES 65536`
+    - 原子变量类型: `volatile atomic_uint` → `_Atomic UInt32`
+    - 缓冲区大小: `16384` → `65536`
+* **验证**: 编译通过，单元测试通过
+
+---
+
+## 2026-02-15 - Per-Client Ring Buffer 实施计划
+
+### 目标
+
+解决多客户端（如 Discord）同时使用时的噪音问题，实现类似 BackgroundMusic 的架构。
+
+### 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    VirtualAudioDriver                       │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │ Client A    │  │ Client B    │  │ Client C    │  ...   │
+│  │ (Safari)    │  │ (Discord)   │  │ (Spotify)   │        │
+│  │ clientID=1  │  │ clientID=2  │  │ clientID=3  │        │
+│  │ ring buffer │  │ ring buffer │  │ ring buffer │        │
+│  │ volume=1.0   │  │ volume=0.5  │  │ volume=0.8   │        │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        │
+│         │                 │                 │                 │
+│         └────────────────┼─────────────────┘                 │
+│                          ▼                                   │
+│              ┌─────────────────────┐                           │
+│              │  Mix & Output      │ ← Input Stream           │
+│              │  (ReadInput)       │                           │
+│              └─────────────────────┘                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 实施步骤
+
+#### Phase 1: 客户端管理（基础）
+
+- [ ] 1.1 定义客户端结构体 `ClientInfo`
+    - `clientID`: UInt32
+    - `pid`: pid_t
+    - `volume`: Float32
+    - `ringBuffer`: Float32[]
+    - `writePos`: atomic_uint
+    - `readPos`: atomic_uint
+    - `active`: bool
+
+- [ ] 1.2 实现客户端表管理
+    - `kMaxClients = 32`
+    - `find_client(clientID)`: 查找客户端
+    - `create_client(clientID, pid)`: 创建客户端
+    - `destroy_client(clientID)`: 销毁客户端
+
+- [ ] 1.3 集成到 AddDeviceClient/RemoveDeviceClient
+    - 新客户端连接时创建 buffer
+    - 客户端断开时销毁 buffer
+
+#### Phase 2: Per-Client Ring Buffer
+
+- [ ] 2.1 修改 WriteMix
+    - 根据 `inClientID` 查找对应客户端 buffer
+    - 写入该客户端的 ring buffer
+
+- [ ] 2.2 修改 ReadInput
+    - 遍历所有活跃客户端
+    - 混合所有客户端的音频数据（按音量）
+    - 输出混合后的数据
+
+- [ ] 2.3 音量控制集成
+    - 读取 AppVolumeTable
+    - 应用客户端音量到混合
+
+#### Phase 3: 测试与调优
+
+- [ ] 3.1 编译验证
+- [ ] 3.2 单元测试
+- [ ] 3.3 Discord 实机测试
+- [ ] 3.4 性能调优（如需要）
+
+### 技术要点
+
+1. **Lock-free**: 使用 C11 atomics，避免 mutex
+2. **内存预分配**: 客户端 buffer 在驱动加载时分配，避免实时分配
+3. **混合策略**: 简单的加法混合，需考虑溢出保护
+4. **时钟统一**: 保持 Freewheel 时钟，Input 和 Output 共享
+
+### 预计改动文件
+
+- `src/driver/virtual_audio_driver.c` - 核心逻辑
+- `src/driver/virtual_audio_driver.h` - 如需要
+
+### 风险与缓解
+
+- **风险**: 改动较大，可能引入新问题
+- **缓解**: 逐阶段实现，每阶段验证
+
+---
+
 ## [日期] - [决策简述，例如：放弃互斥锁改用无锁环形队列]
 
 * **场景上下文**: 在 `AudioDeviceIOProc` 中遇到高频抢占导致的爆音。

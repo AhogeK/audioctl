@@ -1,26 +1,36 @@
 # 项目进度 - 虚拟音频驱动
 
-## 当前状态 (2026-02-14)
+## 当前状态 (2026-02-15)
 
 ### 🟢 已完成 (Stable)
 - **核心音频功能修复**:
-  - [x] **解决无声问题 (No Sound)**: 修复 `GetPropertyData` 中的 `mScope` 校验逻辑，防止 CoreAudio 错误地将 Input Scope 的声道数叠加到 Output Scope (导致 4ch vs 2ch 格式不匹配)。
-  - [x] **解决爆音/卡顿 (Glitching)**: 实现 "Freewheel Clock" (自适应飞轮时钟)，放弃基于 `mach_absolute_time` 的被动计算，改用基于 IO 周期的主动样本计数 (`mSampleCount`)，彻底消除 `TimeStampOutOfLine` 错误。
-  - [x] **格式稳定性**: 回滚并锁定为 `Interleaved Float32` 格式，解决 Non-Interleaved 导致的 `AudioConverter` 异常。
+    - [x] **解决无声问题**: 修复 mScope 校验逻辑
+    - [x] **解决爆音/卡顿**: 实现 Freewheel Clock
+    - [x] **格式稳定性**: 锁定 Interleaved Float32
+- **Loopback Buffer 关键修复** (2026-02-15):
+    - [x] 增大 buffer: 16384 → 65536 采样 (32768 帧 @ 48kHz)
+    - [x] 修复读写竞争: acquire/release memory order
+    - [x] StartIO 清零缓冲区防止旧数据
+    - [x] 溢出保护: 写入前检查是否会追上 readPos
+    - [x] 欠载优化: 部分数据读取 + 静音填充
 - **基础架构**:
-  - [x] 驱动安装/卸载脚本 (`scripts/install.sh`)
-  - [x] 简单的 CLI 控制工具 (`audioctl`)
-  - [x] 基础日志系统 (`os_log`)
+    - [x] 驱动安装/卸载脚本
+    - [x] CLI 控制工具
+    - [x] 日志系统
 
-### 🟡 进行中 / 下一步
-- **功能增强**:
-    - [ ] **完善 App 音量识别逻辑**: (P1) 确保能正确识别并控制单个 App 的音量 (Mixer 基础)。
-    - [ ] 实现全局/单应用音量控制 (Volume Control)
-  - [ ] 实现静音控制 (Mute Control)
-  - [ ] 支持采样率切换 (目前固定 44.1kHz)
-- **代码质量**:
-  - [ ] 代码清理与重构 (移除无用的 debug 代码)
-  - [ ] 完善单元测试覆盖率
+### 🔴 阻塞问题
+
+- **噪音问题**: 与特定应用（Discord）不兼容
+    - **发现**: 使用 Discord 时出现噪音，不使用时正常
+    - **可能原因**:
+        - Discord 使用多个音频流/多个客户端
+        - 多客户端写入 ring buffer 时的竞争条件
+
+### 📋 下一步
+
+1. [ ] **Phase 1**: 实现客户端管理结构 (ClientInfo + 客户端表)
+2. [ ] **Phase 2**: 实现 per-client ring buffer
+3. [ ] **Phase 3**: Discord 实机测试
 
 ---
 
