@@ -947,7 +947,15 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 	    }
 	}
 
-      // 【关键】启动 Router，传入之前保存的物理设备 UID
+      // 【步骤1】先启动 IPC 服务（基础设施就绪）
+      char self_path[4096];
+      uint32_t size = sizeof (self_path);
+      if (_NSGetExecutablePath (self_path, &size) == 0)
+	{
+	  spawn_ipc_service (self_path);
+	}
+
+      // 【步骤2】启动 Router（带增益补偿）
       if (strlen (physical_uid) > 0)
 	{
 	  printf ("🔄 启动 Audio Router...\n");
@@ -959,7 +967,8 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 	    }
 	  else
 	    {
-	      printf ("✅ Router 已启动\n");
+	      printf ("✅ Router 已启动（增益补偿: %.0f%%）\n",
+		      physical_volume * 100.0f);
 	      // 根据 UID 查找设备名称
 	      char device_name[256];
 	      (void) get_device_name_by_uid (physical_uid, device_name,
@@ -970,18 +979,8 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 		      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);
 	      printf ("   监控: 每 5 秒报告一次性能状态\n");
 	    }
-	}
-      else
-	{
-	  fprintf (stderr, "⚠️  无法获取物理设备，Router 未启动\n");
-	}
 
-      // Start Router in background
-      char self_path[4096];
-      uint32_t size = sizeof (self_path);
-      if (_NSGetExecutablePath (self_path, &size) == 0
-	  && strlen (physical_uid) > 0)
-	{
+	  // 【步骤3】后台 Router 启动
 	  pid_t router_pid = spawn_router (self_path, physical_uid);
 	  if (router_pid > 0)
 	    {
@@ -1000,12 +999,11 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 		      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);
 	      printf ("   状态: 🟢 运行平稳\n");
 	    }
-
-	  // Start IPC service
-	  spawn_ipc_service (self_path);
 	}
       else
-	fprintf (stderr, "无法获取可执行文件路径，服务无法启动\n");
+	{
+	  fprintf (stderr, "⚠️  无法获取物理设备，Router 未启动\n");
+	}
 
       printf ("\n📝 提示: 使用 'audioctl virtual-status' 查看详细状态\n");
       printf ("       使用 'audioctl use-physical' 恢复物理设备\n");

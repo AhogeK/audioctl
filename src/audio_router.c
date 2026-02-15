@@ -296,7 +296,7 @@ output_callback (AudioDeviceID inDevice, const AudioTimeStamp *inNow,
 
   rb_read (&g_router.ring_buffer, dst, frames, g_router.channels);
 
-  // 【增益补偿】应用输出增益，防止AGC导致的音量突增
+  // 【增益补偿】应用固定增益，防止AGC导致的音量突增
   // 增益值由启动时传入的物理设备音量决定
   float gain
     = atomic_load_explicit (&g_router.output_gain, memory_order_relaxed);
