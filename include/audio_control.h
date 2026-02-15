@@ -4,7 +4,6 @@
 #ifndef AUDIO_CONTROL_H
 #define AUDIO_CONTROL_H
 
-#include <CoreAudio/CoreAudio.h>
 #include <CoreServices/CoreServices.h>
 #include <AudioToolbox/AudioToolbox.h>
 
@@ -48,6 +47,10 @@ OSStatus
 setDeviceActive (AudioDeviceID deviceId);
 
 // 辅助函数声明
+// 根据 UID 查找设备 ID
+AudioDeviceID
+find_device_by_uid (const char *uid);
+
 const char *
 getTransportTypeName (UInt32 transportType);
 

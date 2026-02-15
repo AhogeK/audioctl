@@ -64,7 +64,7 @@ isVirtualDevice (AudioDeviceID deviceId)
 }
 
 // 根据 UID 查找设备 ID
-static AudioDeviceID
+AudioDeviceID
 find_device_by_uid (const char *uid)
 {
   // 获取所有设备

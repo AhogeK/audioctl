@@ -367,6 +367,27 @@ parseOptions (const int argc, char *argv[], ProgramOptions *opts)
   return validateOptionCombination (opts);
 }
 
+// 辅助函数：根据 UID 获取设备名称
+// 返回值：true 表示成功获取到设备名称，false 表示失败（name 中为 UID）
+static bool
+get_device_name_by_uid (const char *uid, char *name, size_t name_size)
+{
+  AudioDeviceID device = find_device_by_uid (uid);
+  if (device != kAudioObjectUnknown)
+    {
+      AudioDeviceInfo info;
+      if (getDeviceInfo (device, &info) == noErr)
+	{
+	  strncpy (name, info.name, name_size - 1);
+	  name[name_size - 1] = '\0';
+	  return true;
+	}
+    }
+  strncpy (name, uid, name_size - 1);
+  name[name_size - 1] = '\0';
+  return false;
+}
+
 static void
 printDeviceTypeAndChannels (const AudioDeviceInfo *info)
 {
@@ -442,7 +463,20 @@ printDeviceInfo (const AudioDeviceInfo *info)
       char boundUid[256] = {0};
       if (get_bound_physical_device_uid (boundUid, sizeof (boundUid)))
 	{
-	  printf ("\n  绑定状态: 已绑定到 %s", boundUid);
+	  // 根据 UID 查找设备并获取友好名称
+	  AudioDeviceID boundDevice = find_device_by_uid (boundUid);
+	  if (boundDevice != kAudioObjectUnknown)
+	    {
+	      AudioDeviceInfo boundInfo;
+	      printf ("\n  绑定状态: 已绑定到 %s",
+		      getDeviceInfo (boundDevice, &boundInfo) == noErr
+			? boundInfo.name
+			: boundUid);
+	    }
+	  else
+	    {
+	      printf ("\n  绑定状态: 已绑定到 %s", boundUid);
+	    }
 	}
       else
 	{
@@ -511,7 +545,8 @@ isDeviceMatched (const AudioDeviceInfo *device, const ProgramOptions *opts)
     {
       return false;
     }
-  if (opts->showOnlyOutput && device->deviceType != kDeviceTypeOutput)
+  if (opts->showOnlyOutput && device->deviceType != kDeviceTypeOutput
+      && device->deviceType != kDeviceTypeInputOutput)
     {
       return false;
     }
@@ -925,7 +960,11 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 	  else
 	    {
 	      printf ("✅ Router 已启动\n");
-	      printf ("   目标设备: %s\n", physical_uid);
+	      // 根据 UID 查找设备名称
+	      char device_name[256];
+	      (void) get_device_name_by_uid (physical_uid, device_name,
+					     sizeof (device_name));
+	      printf ("   目标设备: %s\n", device_name);
 	      printf ("   缓冲区: %d 帧 (约 %d ms)\n",
 		      ROUTER_BUFFER_FRAME_COUNT,
 		      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);
@@ -951,7 +990,11 @@ handleVirtualDeviceCommands (int __unused argc, char *argv[])
 
 	      // 显示启动状态
 	      printf ("\n✅ Router 已启动 (PID: %d)\n", router_pid);
-	      printf ("   目标设备: %s\n", physical_uid);
+	      // 根据 UID 查找设备名称
+	      char bg_device_name[256];
+	      (void) get_device_name_by_uid (physical_uid, bg_device_name,
+					     sizeof (bg_device_name));
+	      printf ("   目标设备: %s\n", bg_device_name);
 	      printf ("   缓冲区: %d 帧 (约 %d ms)\n",
 		      ROUTER_BUFFER_FRAME_COUNT,
 		      (ROUTER_BUFFER_FRAME_COUNT * 1000) / 48000);

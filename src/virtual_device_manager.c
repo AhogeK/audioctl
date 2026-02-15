@@ -621,8 +621,11 @@ virtual_device_deactivate (void)
 
 	  if (status == noErr)
 	    {
-	      printf ("✅ 已恢复到之前的设备 (ID=%d, UID=%s)\n", previousDevice,
-		      uid);
+	      // 获取设备名称
+	      char device_name[256] = {0};
+	      get_device_name (previousDevice, device_name,
+			       sizeof (device_name));
+	      printf ("✅ 已恢复到之前的设备: %s\n", device_name);
 	      return noErr;
 	    }
 	  else
@@ -696,7 +699,11 @@ virtual_device_deactivate (void)
 
   if (status == noErr)
     {
-      printf ("已恢复到物理音频设备 (回退方案)\n");
+      // 获取设备名称
+      char fallback_name[256] = {0};
+      get_device_name (firstPhysicalDevice, fallback_name,
+		       sizeof (fallback_name));
+      printf ("✅ 已恢复到物理音频设备: %s (回退方案)\n", fallback_name);
     }
 
   return status;
