@@ -17,6 +17,7 @@ add_executable(test_virtual_audio_device
 target_sources(test_virtual_audio_device PRIVATE
         ${CMAKE_SOURCE_DIR}/src/driver/virtual_audio_device.c
         ${CMAKE_SOURCE_DIR}/src/app_volume_control.c
+        ${CMAKE_SOURCE_DIR}/src/audio_control.c
         ${CMAKE_SOURCE_DIR}/src/virtual_device_manager.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_protocol.c
         ${CMAKE_SOURCE_DIR}/src/ipc/ipc_server.c
