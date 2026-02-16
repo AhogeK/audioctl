@@ -816,6 +816,70 @@ handleDeviceSwitch (int argc, char *argv[])
       return 1;
     }
 
+  // 虚拟设备激活时，执行"换绑"操作
+  if (virtual_device_is_active_output ())
+    {
+      if (deviceInfo.transportType == kAudioDeviceTransportTypeVirtual)
+	{
+	  printf ("错误：不能将虚拟设备作为绑定目标\n");
+	  return 1;
+	}
+
+      // 获取新设备的 UID
+      AudioObjectPropertyAddress addr
+	= {kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+	   kAudioObjectPropertyElementMain};
+      CFStringRef uid_ref = NULL;
+      UInt32 uid_size = sizeof (CFStringRef);
+      OSStatus uid_status
+	= AudioObjectGetPropertyData ((AudioDeviceID) deviceId, &addr, 0, NULL,
+				      &uid_size, &uid_ref);
+      if (uid_status != noErr || uid_ref == NULL)
+	{
+	  printf ("错误：无法获取设备 UID\n");
+	  return 1;
+	}
+
+      char newPhysicalUid[256];
+      CFStringGetCString (uid_ref, newPhysicalUid, sizeof (newPhysicalUid),
+			  kCFStringEncodingUTF8);
+      CFRelease (uid_ref);
+
+      // 保存新的绑定信息
+      save_bound_physical_device (newPhysicalUid);
+
+      // 获取设备当前音量用于增益补偿
+      Float32 physical_volume = deviceInfo.volume;
+
+      // 停止旧 Router
+      printf ("🔄 切换绑定目标到 %s...\n", deviceInfo.name);
+      kill_router ();
+
+      // 获取自身路径并启动新 Router
+      char self_path[4096];
+      uint32_t size = sizeof (self_path);
+      if (_NSGetExecutablePath (self_path, &size) == 0)
+	{
+	  // 启动 Router
+	  pid_t router_pid = spawn_router (self_path, newPhysicalUid);
+	  if (router_pid > 0)
+	    {
+	      sleep (1);
+	      printf ("✅ 已切换绑定到: %s (PID: %d)\n", deviceInfo.name,
+		      router_pid);
+	      printf ("   音量补偿: %.0f%%\n", physical_volume * 100.0f);
+	    }
+	  else
+	    {
+	      printf ("错误：启动 Router 失败\n");
+	      return 1;
+	    }
+	}
+
+      return 0;
+    }
+
+  // 非虚拟设备模式：执行原来的设备切换逻辑
   status = setDeviceActive ((AudioDeviceID) deviceId);
   if (status != noErr)
     {
