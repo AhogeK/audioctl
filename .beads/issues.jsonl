@@ -1,1 +1,14 @@
-{"id":"audioctl-nbb","title":"Fix static noise/glitch in audio output","description":"Context: Ring buffer data flow seems correct, but output has artifacts. Suspect clock drift or buffer misalignment.","status":"closed","priority":0,"issue_type":"task","owner":"ahogek@gmail.com","created_at":"2026-02-15T00:55:11.280455+08:00","created_by":"AhogeK","updated_at":"2026-02-15T01:27:08.840962+08:00","closed_at":"2026-02-15T01:27:08.840962+08:00","close_reason":"Closed"}
+{
+  "id": "audioctl-nbb",
+  "title": "Fix static noise/glitch in audio output",
+  "description": "Context: Ring buffer data flow seems correct, but output has artifacts. Suspect clock drift or buffer misalignment.",
+  "status": "closed",
+  "priority": 0,
+  "issue_type": "task",
+  "owner": "ahogek@gmail.com",
+  "created_at": "2026-02-15T00:55:11.280455+08:00",
+  "created_by": "AhogeK",
+  "updated_at": "2026-02-15T01:27:08.840962+08:00",
+  "closed_at": "2026-02-15T01:27:08.840962+08:00",
+  "close_reason": "Closed"
+}
