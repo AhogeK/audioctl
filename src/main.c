@@ -175,58 +175,58 @@ printUsage ()
 {
   printf ("使用方法：\n");
   printf (" audioctl [命令] [参数]\n\n");
+
   printf ("========== 基础命令 ==========\n");
-  printf (" help                   - 显示帮助信息\n");
-  printf (" list                   - 显示所有音频设备\n");
-  printf (
-    " set -i/o [音量]        - 设置当前使用中的输入或输出设备的音量 (0-100)\n");
-  printf (" set [设备ID]           - 将指定ID的设备设置为使用中\n\n");
+  printf (" help                     - 显示帮助信息\n");
+  printf (" list                     - 显示所有音频设备\n");
+  printf (" set -i/o [音量]          - 设置音量 (0-100)\n");
+  printf (" set [设备ID]             - 切换到指定设备\n\n");
 
   printf ("========== 虚拟设备命令 ==========\n");
-  printf (" virtual-status         - 显示虚拟设备状态\n");
-  printf (" use-virtual            - 切换到虚拟音频设备，自动启动所有服务\n");
-  printf (" use-physical           - 恢复到物理设备，停止所有服务\n");
-  printf (" agg-status             - 显示 Aggregate Device 状态\n\n");
+  printf (" virtual-status           - 显示虚拟设备状态\n");
+  printf (" use-virtual              - 切换到虚拟设备\n");
+  printf (" use-physical             - 恢复到物理设备\n");
+  printf (" agg-status               - 显示 Aggregate 状态\n\n");
 
   printf ("========== 应用音量控制 ==========\n");
-  printf (" apps                   - 显示所有音频应用\n");
-  printf (" app-volumes            - 显示所有应用音量控制列表\n");
-  printf (" app-volume [应用] [音量] - 设置指定应用的音量 (0-100)\n");
-  printf ("                          应用可以是PID或应用名称\n");
-  printf (" app-mute [应用]        - 静音指定应用\n");
-  printf (" app-unmute [应用]      - 取消静音指定应用\n\n");
+  printf (" apps                     - 显示所有音频应用\n");
+  printf (" app-volumes              - 显示应用音量列表\n");
+  printf (" app-volume [应用] [音量] - 设置应用音量\n");
+  printf (" app-mute [应用]          - 静音应用\n");
+  printf (" app-unmute [应用]        - 取消静音应用\n\n");
 
   printf ("========== 系统命令 ==========\n");
-  printf (" --version, -v          - 显示版本信息\n");
-  printf (" --service-status       - 查看所有服务状态\n\n");
+  printf (" --version, -v            - 显示版本信息\n");
+  printf (" --service-status         - 查看服务状态\n\n");
 
   printf ("========== 使用示例 ==========\n");
-  printf (" audioctl virtual-status          # 检查虚拟设备状态\n");
-  printf (" audioctl use-virtual             # 切换到虚拟设备（创建Aggregate "
-	  "Device）\n");
-  printf (" audioctl agg-status              # 查看Aggregate Device状态\n");
-  printf (" audioctl app-volumes             # 查看应用音量列表\n");
-  printf (" audioctl app-volume Safari 50    # 设置Safari音量为50%%\n");
-  printf (" audioctl app-mute Chrome         # 静音Chrome\n");
-  printf (" audioctl use-physical            # 恢复物理设备\n\n");
+  printf (" audioctl list\n");
+  printf (" audioctl list -ao\n");
+  printf (" audioctl list -ai\n");
+  printf (" audioctl list -a\n");
+  printf (" audioctl virtual-status\n");
+  printf (" audioctl use-virtual\n");
+  printf (" audioctl use-physical\n");
+  printf (" audioctl set -o 50\n");
+  printf (" audioctl set -i 50\n");
+  printf (" audioctl set 140\n");
+  printf (" audioctl app-volumes\n");
+  printf (" audioctl app-volume Safari 50\n");
+  printf (" audioctl app-mute Chrome\n");
+  printf (" audioctl app-unmute Chrome\n\n");
 
-  // 使用专门用于显示帮助的选项数组
-  const CommandOption *options = getCommandOptions ();
+  printf ("========== 选项 ==========\n");
+  printf (" -a, --active             - 只列出使用中的设备\n");
+  printf (" -i, --input              - 输入设备\n");
+  printf (" -o, --output             - 输出设备\n");
 
-  printf ("\n选项：\n");
-  for (int i = 0; options[i].shortOpt != 0; i++)
-    {
-      printf (" -%c, --%-12s - %s\n", options[i].shortOpt, options[i].longOpt,
-	      options[i].description);
-    }
-
-  printf ("\n选项可组合使用，例如：\n");
-  printf (" list -ai          - 只列出使用中的输入设备\n");
-  printf (" list -ao          - 只列出使用中的输出设备\n");
-  printf (" set  -o 44.1      - 将当前使用中的输出设备音量设置为 44.1%%\n");
-  printf (" set  -i 50        - 将当前使用中的输入设备音量设置为 50.0%%\n");
-  printf (" set 117           - "
-	  "将ID为117的设备设置为使用中（自动识别输入/输出设备）\n");
+  printf ("\n========== 选项组合示例 ==========\n");
+  printf (" audioctl list -a              - 只列出使用中设备\n");
+  printf (" audioctl list -ai             - 只列使用中输入设备\n");
+  printf (" audioctl list -ao             - 只列使用中输出设备\n");
+  printf (" audioctl set -o 44.1          - 设置输出音量\n");
+  printf (" audioctl set -i 50            - 设置输入音量\n");
+  printf (" audioctl set 117              - 切换到设备\n");
 }
 
 // 解析单个短选项
